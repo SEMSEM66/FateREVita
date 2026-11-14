@@ -431,6 +431,7 @@ void ScriptVM::complete_fcf_scene() {
     if (fcf_node_id_ == 1) { enter_fcf_node(2); return; }
     if (fcf_node_id_ == 2) { enter_fcf_node(3); return; }
     if (fcf_node_id_ == 3) {
+      set_flag("g\xE3\x83\x97\xE3\x83\xAD\xE3\x83\xAD\xE3\x83\xBC\xE3\x82\xB0\xE3\x82\xAF\xE3\x83\xAA\xE3\x82\xA2", 1);  // gプロローグクリア
       bool script_had_movie = false;
       if (script_.contains("ops") && script_["ops"].is_array()) {
         for (const auto& op : script_["ops"]) {
@@ -1293,12 +1294,16 @@ void ScriptVM::exec_cmd(const std::string& cmd, const nlohmann::json& args) {
   } else if (cmd == "playmovie") {
     std::string storage = get_file_arg();
     bool canskip = arg_bool(args, "canskip", true);
+    if (extras_) {
+      extras_->unlock_movie(storage);
+    }
     bool had_bgm = cur_bgm_playing_;
     std::string prev_bgm = cur_bgm_stem_;
     audio_->stop_voice();
     audio_->stop_bgm(0);
     cur_bgm_playing_ = false;
     VideoPlayer::play(storage, canskip, data_root_, manifest_, renderer_, audio_);
+    movie_played_this_step_ = true;
     if (had_bgm && !prev_bgm.empty()) {
       play_bgm_stem(prev_bgm, 300);
     } else {
@@ -1426,77 +1431,96 @@ void ScriptVM::update(float dt_sec, bool btn_up, bool btn_down, bool btn_advance
     quake_timer_ = std::max(0.0f, quake_timer_ - dt_sec);
   }
 
-  // Advance background transition
-  if (bg_trans_.active) {
-    bg_trans_.elapsed += dt_sec * (btn_skip_held ? 4.0f : 1.0f);
-    if (bg_trans_.elapsed >= bg_trans_.duration) {
-      bg_name_ = bg_trans_.next_name;
-      bg_path_ = bg_trans_.next_path;
-      bg_fliplr_ = bg_trans_.next_fliplr;
-      bg_flipud_ = bg_trans_.next_flipud;
-      bg_is_solid_ = bg_trans_.to_solid || bg_path_.empty();
-      bg_r_ = bg_trans_.solid_r;
-      bg_g_ = bg_trans_.solid_g;
-      bg_b_ = bg_trans_.solid_b;
-      bg_trans_.active = false;
-      wait_trans_ = false;
-    }
-  }
+  movie_played_this_step_ = false;
+  const int max_steps = btn_skip_held ? 12 : 1;
 
-  // Advance layer tweens
-  bool any_moving = false;
-  for (auto& kv : layers_) {
-    Layer& l = kv.second;
-    if (!l.moving) continue;
-    l.move_elapsed += dt_sec * (btn_skip_held ? 4.0f : 1.0f);
-    float t = apply_accel(l.move_elapsed / std::max(0.01f, l.move_duration), l.accel);
-    l.x = l.start_x + (l.end_x - l.start_x) * t;
-    l.y = l.start_y + (l.end_y - l.start_y) * t;
-    l.alpha = l.start_a + (l.end_a - l.start_a) * t;
-    if (l.move_elapsed >= l.move_duration) {
-      l.x = l.end_x;
-      l.y = l.end_y;
-      l.alpha = l.end_a;
-      l.moving = false;
-    } else {
-      any_moving = true;
-    }
-  }
-  if (!any_moving) wait_move_ = false;
+  for (int skip_step = 0; skip_step < max_steps; ++skip_step) {
+    if (choice_active_ || finished_ || credits_active_ || movie_played_this_step_) break;
 
-  text_->update(dt_sec * (btn_skip_held ? 8.0f : 1.0f));
-
-  if (wait_timer_ > 0.0f) {
-    if ((btn_advance && wait_timer_skippable_) || btn_skip_held) {
-      wait_timer_ = 0.0f;
-    } else {
-      wait_timer_ = std::max(0.0f, wait_timer_ - dt_sec);
-    }
-  }
-
-  if (wait_click_) {
-    if (btn_skip_held) {
-      text_->reveal_all();
-      wait_click_ = false;
-      if (wait_page_) {
-        text_->clear_page();
-        wait_page_ = false;
-      }
-    } else if (btn_advance) {
-      if (text_->is_revealing()) {
-        text_->reveal_all();
+    // Advance background transition
+    if (bg_trans_.active) {
+      if (btn_skip_held) {
+        bg_trans_.elapsed = bg_trans_.duration;
       } else {
+        bg_trans_.elapsed += dt_sec;
+      }
+      if (bg_trans_.elapsed >= bg_trans_.duration) {
+        bg_name_ = bg_trans_.next_name;
+        bg_path_ = bg_trans_.next_path;
+        bg_fliplr_ = bg_trans_.next_fliplr;
+        bg_flipud_ = bg_trans_.next_flipud;
+        bg_is_solid_ = bg_trans_.to_solid || bg_path_.empty();
+        bg_r_ = bg_trans_.solid_r;
+        bg_g_ = bg_trans_.solid_g;
+        bg_b_ = bg_trans_.solid_b;
+        bg_trans_.active = false;
+        wait_trans_ = false;
+      }
+    }
+
+    // Advance layer tweens
+    bool any_moving = false;
+    for (auto& kv : layers_) {
+      Layer& l = kv.second;
+      if (!l.moving) continue;
+      if (btn_skip_held) {
+        l.move_elapsed = l.move_duration;
+      } else {
+        l.move_elapsed += dt_sec;
+      }
+      float t = apply_accel(l.move_elapsed / std::max(0.01f, l.move_duration), l.accel);
+      l.x = l.start_x + (l.end_x - l.start_x) * t;
+      l.y = l.start_y + (l.end_y - l.start_y) * t;
+      l.alpha = l.start_a + (l.end_a - l.start_a) * t;
+      if (l.move_elapsed >= l.move_duration) {
+        l.x = l.end_x;
+        l.y = l.end_y;
+        l.alpha = l.end_a;
+        l.moving = false;
+      } else {
+        any_moving = true;
+      }
+    }
+    if (!any_moving) wait_move_ = false;
+
+    if (skip_step == 0) {
+      text_->update(dt_sec * (btn_skip_held ? 8.0f : 1.0f));
+    }
+
+    if (wait_timer_ > 0.0f) {
+      if ((btn_advance && wait_timer_skippable_) || btn_skip_held) {
+        wait_timer_ = 0.0f;
+      } else {
+        wait_timer_ = std::max(0.0f, wait_timer_ - dt_sec);
+      }
+    }
+
+    if (wait_click_) {
+      if (btn_skip_held) {
+        text_->reveal_all();
         wait_click_ = false;
         if (wait_page_) {
           text_->clear_page();
           wait_page_ = false;
         }
+      } else if (btn_advance) {
+        if (text_->is_revealing()) {
+          text_->reveal_all();
+        } else {
+          wait_click_ = false;
+          if (wait_page_) {
+            text_->clear_page();
+            wait_page_ = false;
+          }
+        }
       }
     }
-  }
 
-  if (!wait_click_ && wait_timer_ <= 0.0f && !wait_move_ && !wait_trans_) {
-    step_until_blocked();
+    if (!wait_click_ && wait_timer_ <= 0.0f && !wait_move_ && !wait_trans_) {
+      step_until_blocked();
+    } else {
+      break;
+    }
   }
 }
 

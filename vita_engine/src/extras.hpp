@@ -16,6 +16,7 @@
 namespace fsn {
 
 class ScriptVM;
+class TitleScreen;
 
 struct BgmTrackInfo {
   std::string id;
@@ -37,6 +38,9 @@ struct CgGroupInfo {
   std::string id;
   std::string category;
   bool is_adult = false;
+  bool is_movie = false;
+  std::string movie_id;
+  std::string movie_title;
   std::string thumb_all_ages;
   std::string thumb_mosaic;
   std::string thumb_demosaic;
@@ -61,6 +65,8 @@ class ExtrasManager {
   const std::vector<BgmTrackInfo>& bgm_tracks() const { return bgm_tracks_; }
 
   bool mark_cg_seen(const std::string& raw_stem);
+  bool unlock_movie(const std::string& raw_stem);
+  bool is_movie_unlocked(const std::string& id, bool unlock_all) const;
   bool is_cg_variant_seen(const std::string& stem, bool unlock_all) const;
   bool is_cg_group_unlocked(const CgGroupInfo& group, bool unlock_all) const;
   int unlocked_cg_group_count(ContentMode mode, bool unlock_all) const;
@@ -83,6 +89,7 @@ class ExtrasManager {
 
   std::unordered_set<std::string> unlocked_bgm_;
   std::unordered_set<std::string> seen_cgs_;
+  std::unordered_set<std::string> unlocked_movies_;
 
   void load_bgm_index(const nlohmann::json& manifest);
   void load_cg_index();
@@ -132,7 +139,7 @@ class CgGalleryScreen {
  public:
   void init(const std::string& data_root, Renderer* renderer, AudioEngine* audio,
             TextRenderer* text, AppConfig* config, const std::string& config_path,
-            ExtrasManager* extras, bool circle_confirm);
+            ExtrasManager* extras, ScriptVM* vm, TitleScreen* title, bool circle_confirm);
   void enter();
   void leave();
 
@@ -151,6 +158,8 @@ class CgGalleryScreen {
   TextRenderer* text_ = nullptr;
   AppConfig* config_ = nullptr;
   ExtrasManager* extras_ = nullptr;
+  ScriptVM* vm_ = nullptr;
+  TitleScreen* title_ = nullptr;
   bool circle_confirm_ = false;
 
   std::vector<const CgGroupInfo*> filtered_;

@@ -141,6 +141,7 @@ class ScriptVM {
   bool wait_timer_skippable_ = true;
   bool wait_move_ = false;
   bool wait_trans_ = false;
+  bool movie_played_this_step_ = false;
 
   // Interactive choice / Tiger retry UI
   bool choice_active_ = false;

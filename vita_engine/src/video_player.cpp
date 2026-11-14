@@ -355,6 +355,7 @@ bool VideoPlayer::play(const std::string& storage, bool canskip,
     audio->stop_bgm(0);
     if (tex_id != 0) glDeleteTextures(1, &tex_id);
     sceAvcdecDeleteDecoder(&decoder);
+    renderer->begin_frame();
     played_ok = true;
   } while (false);
 

@@ -1,6 +1,8 @@
 #include "extras.hpp"
 #include "log.hpp"
 #include "script_vm.hpp"
+#include "title_screen.hpp"
+#include "video_player.hpp"
 
 #include <psp2/io/stat.h>
 
@@ -35,7 +37,7 @@ std::string clean_stem(const std::string& raw) {
   if (dot != std::string::npos) {
     std::string ext = lower_ascii(s.substr(dot));
     if (ext == ".ogg" || ext == ".wav" || ext == ".fcd" || ext == ".png" ||
-        ext == ".jpg" || ext == ".webp" || ext == ".bmp") {
+        ext == ".jpg" || ext == ".webp" || ext == ".bmp" || ext == ".mpg") {
       s = s.substr(0, dot);
     }
   }
@@ -138,68 +140,108 @@ void ExtrasManager::load_bgm_index(const nlohmann::json& manifest) {
 
 void ExtrasManager::load_cg_index() {
   cg_groups_.clear();
-  cg_categories_ = {"All"};
+  cg_categories_ = {"All", "Movies"};
   cg_stem_map_.clear();
   cg_sub_unlocks_.clear();
 
   nlohmann::json idx;
-  if (!read_json_doc(data_root_ + "/gallery/cg_index.json", idx)) return;
-
-  if (idx.contains("categories") && idx["categories"].is_array() &&
-      !idx["categories"].empty()) {
-    cg_categories_.clear();
-    for (const auto& c : idx["categories"]) {
-      if (c.is_string()) cg_categories_.push_back(c.get<std::string>());
-    }
-  }
-
-  if (idx.contains("sub_unlocks") && idx["sub_unlocks"].is_object()) {
-    for (auto it = idx["sub_unlocks"].begin(); it != idx["sub_unlocks"].end(); ++it) {
-      if (!it.value().is_array()) continue;
-      std::vector<std::string> kids;
-      for (const auto& k : it.value()) {
-        if (k.is_string()) kids.push_back(k.get<std::string>());
+  if (read_json_doc(data_root_ + "/gallery/cg_index.json", idx)) {
+    if (idx.contains("categories") && idx["categories"].is_array() &&
+        !idx["categories"].empty()) {
+      cg_categories_.clear();
+      for (const auto& c : idx["categories"]) {
+        if (c.is_string()) cg_categories_.push_back(c.get<std::string>());
       }
-      cg_sub_unlocks_[lower_ascii(it.key())] = kids;
+      if (std::find(cg_categories_.begin(), cg_categories_.end(), "Movies") ==
+          cg_categories_.end()) {
+        auto pos = cg_categories_.empty() ? cg_categories_.begin() : cg_categories_.begin() + 1;
+        cg_categories_.insert(pos, "Movies");
+      }
     }
-  }
 
-  if (idx.contains("cgs") && idx["cgs"].is_array()) {
-    cg_groups_.reserve(idx["cgs"].size());
-    for (const auto& cg : idx["cgs"]) {
-      if (!cg.is_object()) continue;
-      CgGroupInfo g;
-      g.id = cg.value("id", "");
-      g.category = cg.value("category", "Extra");
-      g.is_adult = cg.value("is_adult", false);
-      g.thumb_all_ages = cg.value("thumb_all_ages", "");
-      g.thumb_mosaic = cg.value("thumb_mosaic", "");
-      g.thumb_demosaic = cg.value("thumb_demosaic", "");
-      if (cg.contains("variants") && cg["variants"].is_array()) {
-        for (const auto& v : cg["variants"]) {
-          if (!v.is_object()) continue;
-          CgVariantInfo vi;
-          vi.stem = v.value("stem", "");
-          vi.all_ages = v.value("all_ages", "");
-          vi.mosaic = v.value("mosaic", "");
-          vi.demosaic = v.value("demosaic", "");
-          if (!vi.stem.empty()) {
-            cg_stem_map_[vi.stem] = vi.stem;
-            cg_stem_map_[lower_ascii(vi.stem)] = vi.stem;
-            g.variants.push_back(std::move(vi));
+    if (idx.contains("sub_unlocks") && idx["sub_unlocks"].is_object()) {
+      for (auto it = idx["sub_unlocks"].begin(); it != idx["sub_unlocks"].end(); ++it) {
+        if (!it.value().is_array()) continue;
+        std::vector<std::string> kids;
+        for (const auto& k : it.value()) {
+          if (k.is_string()) kids.push_back(k.get<std::string>());
+        }
+        cg_sub_unlocks_[lower_ascii(it.key())] = kids;
+      }
+    }
+
+    if (idx.contains("cgs") && idx["cgs"].is_array()) {
+      cg_groups_.reserve(idx["cgs"].size() + 3);
+      for (const auto& cg : idx["cgs"]) {
+        if (!cg.is_object()) continue;
+        CgGroupInfo g;
+        g.id = cg.value("id", "");
+        g.category = cg.value("category", "Extra");
+        g.is_adult = cg.value("is_adult", false);
+        g.thumb_all_ages = cg.value("thumb_all_ages", "");
+        g.thumb_mosaic = cg.value("thumb_mosaic", "");
+        g.thumb_demosaic = cg.value("thumb_demosaic", "");
+        if (cg.contains("variants") && cg["variants"].is_array()) {
+          for (const auto& v : cg["variants"]) {
+            if (!v.is_object()) continue;
+            CgVariantInfo vi;
+            vi.stem = v.value("stem", "");
+            vi.all_ages = v.value("all_ages", "");
+            vi.mosaic = v.value("mosaic", "");
+            vi.demosaic = v.value("demosaic", "");
+            if (!vi.stem.empty()) {
+              cg_stem_map_[vi.stem] = vi.stem;
+              cg_stem_map_[lower_ascii(vi.stem)] = vi.stem;
+              g.variants.push_back(std::move(vi));
+            }
           }
         }
-      }
-      if (!g.id.empty() && !g.variants.empty()) {
-        cg_groups_.push_back(std::move(g));
+        if (!g.id.empty() && !g.variants.empty()) {
+          cg_groups_.push_back(std::move(g));
+        }
       }
     }
   }
+
+  auto find_thumb = [&](const std::string& cat) -> std::string {
+    for (const auto& g : cg_groups_) {
+      if (!g.is_adult && g.category == cat && !g.thumb_all_ages.empty()) {
+        return g.thumb_all_ages;
+      }
+    }
+    return "";
+  };
+
+  const struct {
+    const char* id;
+    const char* movie_id;
+    const char* title;
+    const char* cat_thumb;
+  } kMovies[3] = {
+      {"MOVIE_01", "op01", "OP 1: Fate", "Prologue"},
+      {"MOVIE_02", "op02", "OP 2: UBW", "UBW"},
+      {"MOVIE_03", "op03", "OP 3: Heaven's Feel", "Heaven's Feel"},
+  };
+
+  std::vector<CgGroupInfo> movie_entries;
+  for (const auto& m : kMovies) {
+    CgGroupInfo mg;
+    mg.id = m.id;
+    mg.category = "Movies";
+    mg.is_adult = false;
+    mg.is_movie = true;
+    mg.movie_id = m.movie_id;
+    mg.movie_title = m.title;
+    mg.thumb_all_ages = find_thumb(m.cat_thumb);
+    movie_entries.push_back(std::move(mg));
+  }
+  cg_groups_.insert(cg_groups_.begin(), movie_entries.begin(), movie_entries.end());
 }
 
 bool ExtrasManager::load() {
   unlocked_bgm_.clear();
   seen_cgs_.clear();
+  unlocked_movies_.clear();
   nlohmann::json j;
   if (!read_json_doc(extras_path_, j)) return false;
 
@@ -215,6 +257,11 @@ bool ExtrasManager::load() {
         auto it = cg_stem_map_.find(s);
         seen_cgs_.insert(it != cg_stem_map_.end() ? it->second : s);
       }
+    }
+  }
+  if (j.contains("unlocked_movies") && j["unlocked_movies"].is_array()) {
+    for (const auto& v : j["unlocked_movies"]) {
+      if (v.is_string()) unlocked_movies_.insert(clean_bgm_stem(v.get<std::string>()));
     }
   }
   return true;
@@ -234,6 +281,10 @@ bool ExtrasManager::save() const {
   std::vector<std::string> cgs(seen_cgs_.begin(), seen_cgs_.end());
   std::sort(cgs.begin(), cgs.end());
   j["seen_cgs"] = cgs;
+
+  std::vector<std::string> movies(unlocked_movies_.begin(), unlocked_movies_.end());
+  std::sort(movies.begin(), movies.end());
+  j["unlocked_movies"] = movies;
 
   std::ofstream ofs(extras_path_, std::ios::trunc);
   if (!ofs.is_open()) return false;
@@ -316,6 +367,20 @@ bool ExtrasManager::mark_cg_seen(const std::string& raw_stem) {
   return changed;
 }
 
+bool ExtrasManager::unlock_movie(const std::string& raw_stem) {
+  std::string s = clean_bgm_stem(raw_stem);
+  if (s.empty()) return false;
+  if (unlocked_movies_.count(s)) return false;
+  unlocked_movies_.insert(s);
+  save();
+  return true;
+}
+
+bool ExtrasManager::is_movie_unlocked(const std::string& id, bool unlock_all) const {
+  if (unlock_all) return true;
+  return unlocked_movies_.count(clean_bgm_stem(id)) > 0;
+}
+
 bool ExtrasManager::is_cg_variant_seen(const std::string& stem, bool unlock_all) const {
   if (unlock_all) return true;
   return seen_cgs_.count(stem) > 0;
@@ -323,6 +388,7 @@ bool ExtrasManager::is_cg_variant_seen(const std::string& stem, bool unlock_all)
 
 bool ExtrasManager::is_cg_group_unlocked(const CgGroupInfo& group, bool unlock_all) const {
   if (unlock_all) return true;
+  if (group.is_movie) return is_movie_unlocked(group.movie_id, unlock_all);
   for (const auto& v : group.variants) {
     if (seen_cgs_.count(v.stem)) return true;
   }
@@ -689,7 +755,8 @@ void MusicRoomScreen::draw() {
 
 void CgGalleryScreen::init(const std::string& data_root, Renderer* renderer, AudioEngine* audio,
                            TextRenderer* text, AppConfig* config, const std::string& config_path,
-                           ExtrasManager* extras, bool circle_confirm) {
+                           ExtrasManager* extras, ScriptVM* vm, TitleScreen* title,
+                           bool circle_confirm) {
   data_root_ = data_root;
   renderer_ = renderer;
   audio_ = audio;
@@ -697,6 +764,8 @@ void CgGalleryScreen::init(const std::string& data_root, Renderer* renderer, Aud
   config_ = config;
   config_path_ = config_path;
   extras_ = extras;
+  vm_ = vm;
+  title_ = title;
   circle_confirm_ = circle_confirm;
 }
 
@@ -970,7 +1039,16 @@ bool CgGalleryScreen::update(float dt_sec, bool up, bool down, bool left, bool r
     const CgGroupInfo* g = filtered_[static_cast<size_t>(selected_)];
     if (extras_->is_cg_group_unlocked(*g, config_ && config_->unlock_all_extras)) {
       if (audio_) audio_->play_se("ui_decide", data_root_ + "/audio/se/se_title_decide.ogg");
-      open_viewer(g);
+      if (g->is_movie) {
+        clear_thumb_cache();
+        if (audio_) audio_->stop_bgm(0);
+        if (vm_) {
+          VideoPlayer::play(g->movie_id, true, data_root_, vm_->manifest(), renderer_, audio_);
+        }
+        if (title_) title_->play_bgm();
+      } else {
+        open_viewer(g);
+      }
     } else if (audio_) {
       audio_->play_se("ui_move", data_root_ + "/audio/se/se_title_move.ogg");
     }
@@ -1069,18 +1147,27 @@ void CgGalleryScreen::draw() {
       } else {
         renderer_->draw_rect(cx + 22.0f, cy + 4.0f, 160.0f, 90.0f, 0.14f, 0.22f, 0.36f, 1.0f);
       }
-      int seen_vars = 0;
-      for (const auto& v : g->variants) {
-        if (extras_->is_cg_variant_seen(v.stem, unlock_all)) ++seen_vars;
+      if (g->is_movie) {
+        renderer_->draw_rect(cx + 22.0f, cy + 4.0f, 160.0f, 22.0f, 0.04f, 0.08f, 0.16f, 0.82f);
+        text_->draw_simple("MOVIE [PLAY]", cx + 48.0f, cy + 7.0f, 0.62f, 0.65f, 0.95f, 1.0f, 1.0f);
+        text_->draw_simple(g->movie_title, cx + 18.0f, cy + 96.0f, 0.62f, 0.92f, 0.96f, 1.0f, 1.0f);
+      } else {
+        int seen_vars = 0;
+        for (const auto& v : g->variants) {
+          if (extras_->is_cg_variant_seen(v.stem, unlock_all)) ++seen_vars;
+        }
+        char lbl[64];
+        std::snprintf(lbl, sizeof(lbl), "%s   (%d/%u)", g->id.c_str(), seen_vars,
+                      static_cast<unsigned>(g->variants.size()));
+        text_->draw_simple(lbl, cx + 18.0f, cy + 96.0f, 0.62f, 0.92f, 0.96f, 1.0f, 1.0f);
       }
-      char lbl[64];
-      std::snprintf(lbl, sizeof(lbl), "%s   (%d/%u)", g->id.c_str(), seen_vars,
-                    static_cast<unsigned>(g->variants.size()));
-      text_->draw_simple(lbl, cx + 18.0f, cy + 96.0f, 0.62f, 0.92f, 0.96f, 1.0f, 1.0f);
     } else {
       renderer_->draw_rect(cx + 22.0f, cy + 4.0f, 160.0f, 90.0f, 0.05f, 0.07f, 0.12f, 1.0f);
-      text_->draw_simple("LOCKED", cx + 72.0f, cy + 40.0f, 0.72f, 0.50f, 0.54f, 0.62f, 0.9f);
-      text_->draw_simple(g->id, cx + 18.0f, cy + 96.0f, 0.62f, 0.52f, 0.56f, 0.65f, 0.85f);
+      text_->draw_simple(g->is_movie ? "[MOVIE] LOCKED" : "LOCKED",
+                         cx + (g->is_movie ? 44.0f : 72.0f), cy + 40.0f,
+                         0.72f, 0.50f, 0.54f, 0.62f, 0.9f);
+      text_->draw_simple(g->is_movie ? g->movie_title : g->id,
+                         cx + 18.0f, cy + 96.0f, 0.62f, 0.52f, 0.56f, 0.65f, 0.85f);
     }
   }
 

@@ -28,14 +28,13 @@ class TitleScreen {
                      bool confirm, bool back, bool touch_tap, float touch_x, float touch_y);
   void draw();
 
-  int start_preset() const { return start_preset_; }
   bool is_main() const { return sub_mode_ == SubMode::Main; }
   void apply_volumes();
+  void play_bgm() { play_title_bgm(); }
 
  private:
   enum class SubMode {
     Main,
-    NewGameSetup,
     ConfigMenu,
   };
 
@@ -51,13 +50,12 @@ class TitleScreen {
   SubMode sub_mode_ = SubMode::Main;
   int selected_ = 0;
   int sub_row_ = 0;
-  int start_preset_ = 0;
   float anim_time_ = 0.0f;
 
   void play_title_bgm();
-  void adjust_option(bool is_setup, int row, int dir);
+  void adjust_option(int row, int dir);
   void draw_main();
-  void draw_options_panel(bool is_setup);
+  void draw_config_panel();
 };
 
 }  // namespace fsn

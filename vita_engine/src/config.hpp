@@ -33,7 +33,7 @@ struct TitleBgmInfo {
 struct AppConfig {
   OstMode ost_mode = OstMode::New;
   ContentMode content_mode = ContentMode::AllAges;
-  bool unlock_all_routes = true;
+  bool unlock_all_routes = false;
   bool unlock_all_extras = false;
   float bgm_vol = 0.8f;
   float se_vol = 0.9f;
@@ -73,7 +73,8 @@ struct AppConfig {
       content_mode = ContentMode::AllAges;
     }
 
-    unlock_all_routes = j.value("unlock_all_routes", true);
+    // Keep authentic Remastered route progression (Prologue -> Fate -> UBW -> HF).
+    unlock_all_routes = false;
     unlock_all_extras = j.value("unlock_all_extras", false);
     bgm_vol = j.value("bgm_vol", 0.8f);
     se_vol = j.value("se_vol", 0.9f);

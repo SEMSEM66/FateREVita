@@ -39,17 +39,17 @@ A native PS Vita port and PC asset pipeline for **Fate/stay night REMASTERED** (
   - Startup configuration panel & persistent settings (`ux0:data/FateReVita/config.json`)
   - Quick-Save / `Continue` (`ux0:data/FateReVita/save0.json`)
   - `START` Pause Menu to switch Soundtrack or Content Mode on the fly, Quick-Save, view Backlog, or return to Title
-  - Chapter / Route quick-start presets in New Game setup
+  - Authentic Fate/stay night REMASTERED route progression (Prologue -> Fate -> Unlimited Blade Works -> Heaven's Feel)
   - Region-aware Circle / Cross confirm button detection (`sceAppUtilSystemParamGetInt`)
   - Built-in USTAR `.tar` installer on boot: extracts `ux0:data/FateReVita_base.tar` and indexes `ux0:data/FateReVita_voice.tar` in-place (`audio/voice.tar` + `audio/voice.idx`) so 28k+ voice lines stream without extracting tens of thousands of loose files onto FAT32/exFAT
 - **Opening Video Playback (`playmovie`):**
   - Hardware-accelerated H.264 Baseline (`960x544`, 23.976 fps via `SceVideodec`) paired with a separate Vorbis audio track (`.h264` + `.vidx` frame index + `.ogg`) and synced to the audio clock
-  - Plays `op01` (after Prologue Day 3), `op02` (Unlimited Blade Works Day 3), and `op03` (Heaven's Feel Day 3), automatically stopping and restoring BGM afterward
+  - Plays `op01` (after Prologue Day 3), `op02` (Unlimited Blade Works Day 3), and `op03` (Heaven's Feel Day 3), automatically stopping and restoring BGM afterward — unlocked videos can also be replayed directly from the **Movies** tab in **CG Gallery** (or all 3 via **Unlock All**)
   - Skippable via `Cross`, `Circle`, `Start`, or touchscreen tap (`canskip`), and falls back to skipping cleanly if video files are missing or decoder initialization/allocation fails
 - **Music Room & CG Gallery Extras (`ux0:data/FateReVita/extras.json`):**
   - Accessed directly from the Title Screen (`MUSIC ROOM` and `CG GALLERY`), with persistent unlock tracking across routes/sessions in `ux0:data/FateReVita/extras.json` (plus an **Extras Unlock** setting in Config — `Normal (Unlock in Game)` vs `Unlock All (Music & CGs)` — and a live `Select` shortcut inside either screen)
   - **Music Room:** Scrollable 72-track list generated in `audio/bgm_index.json`, current-track status, Play/Pause, Previous/Next unlocked track, Loop toggle, and live `New (Remastered)` / `Old (2004 / PS2)` OST switching honoring `.sli` seamless sample-accurate loops through the game's audio engine, stopping cleanly on exit
-  - **CG Gallery:** 4x3 thumbnail grid (`gallery/cg_index.json` + lazy-cached `160x90` thumbnails) with category tabs, locked placeholders, full-screen viewer with variant cycling (`L/R` or `Left/Right`), `Square` HUD toggle, and live `Triangle` Content Mode switching (`All-Ages` completely omits all 27 adult CG entries without even showing locked placeholders)
+  - **CG Gallery:** 4x3 thumbnail grid (`gallery/cg_index.json` + lazy-cached `160x90` thumbnails) with `Movies` + route category tabs, direct opening video playback, locked placeholders, full-screen viewer with variant cycling (`L/R` or `Left/Right`), `Square` HUD toggle, and live `Triangle` Content Mode switching (`All-Ages` completely omits all 27 adult CG entries without even showing locked placeholders)
 
 ### Known Limitations
 

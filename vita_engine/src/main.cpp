@@ -435,7 +435,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
 
   fsn::CgGalleryScreen cg_gallery;
   cg_gallery.init(data_root, &renderer, &audio, &text, &config, config_path,
-                  &extras, circle_confirm);
+                  &extras, &vm, &title, circle_confirm);
 
   enum class AppMode { BootNotice, Title, MusicRoom, CgGallery, Game };
   AppMode mode = AppMode::BootNotice;
@@ -521,10 +521,10 @@ int main(int /*argc*/, char* /*argv*/[]) {
         if (act == fsn::TitleAction::NewGame) {
           audio.stop_bgm(500);
           pause_open = false;
-          if (vm.start_preset(title.start_preset(), choice_backup_path)) {
+          if (vm.start_preset(0, choice_backup_path)) {
             mode = AppMode::Game;
           } else {
-            fsn::log::info("[Main] Failed to start preset %d", title.start_preset());
+            fsn::log::info("[Main] Failed to start New Game");
             title.enter(file_exists(save_path.c_str()));
           }
         } else if (act == fsn::TitleAction::Continue) {
