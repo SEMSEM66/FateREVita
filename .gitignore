@@ -1,0 +1,32 @@
+# Copyrighted game data & extracted/compiled asset bundles (must NOT be committed)
+steam_files/
+ue_files/
+vita_data/
+vita_data_full/
+dist/
+
+# External tools, third-party clones, keys, and Windows decryption DLLs
+tools/
+
+# CMake / VitaSDK build outputs & packages
+vita_engine/build/
+vita_engine/build_bundled/
+vita_engine/build*/
+*.vpk
+*.self
+*.velf
+*.elf
+*.o
+*.obj
+
+# Python caches & temporary packaging outputs
+**/__pycache__/
+*.pyc
+*.pyo
+.cache/
+*.tar
+
+# OS / editor noise
+Thumbs.db
+.DS_Store
+.vscode/
