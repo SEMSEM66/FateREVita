@@ -433,7 +433,11 @@ int main(int /*argc*/, char* /*argv*/[]) {
   music_room.init(data_root, &renderer, &audio, &text, &config, config_path,
                   &extras, &vm, circle_confirm);
 
-  enum class AppMode { BootNotice, Title, MusicRoom, Game };
+  fsn::CgGalleryScreen cg_gallery;
+  cg_gallery.init(data_root, &renderer, &audio, &text, &config, config_path,
+                  &extras, circle_confirm);
+
+  enum class AppMode { BootNotice, Title, MusicRoom, CgGallery, Game };
   AppMode mode = AppMode::BootNotice;
   float boot_timer = 0.0f;
 
@@ -532,6 +536,9 @@ int main(int /*argc*/, char* /*argv*/[]) {
         } else if (act == fsn::TitleAction::MusicRoom) {
           music_room.enter();
           mode = AppMode::MusicRoom;
+        } else if (act == fsn::TitleAction::CgGallery) {
+          cg_gallery.enter();
+          mode = AppMode::CgGallery;
         } else if (act == fsn::TitleAction::Exit) {
           running = false;
         }
@@ -543,6 +550,17 @@ int main(int /*argc*/, char* /*argv*/[]) {
           btn_l, btn_r, btn_start, btn_select,
           touch_tap, touch_x, touch_y);
       music_room.draw();
+      if (!stay) {
+        mode = AppMode::Title;
+        title.enter(file_exists(save_path.c_str()));
+      }
+    } else if (mode == AppMode::CgGallery) {
+      bool stay = cg_gallery.update(
+          dt, btn_up, btn_down, btn_left, btn_right,
+          btn_sys_confirm, btn_sys_back, btn_triangle, btn_toggle_text,
+          btn_l, btn_r, btn_select,
+          touch_tap, touch_x, touch_y);
+      cg_gallery.draw();
       if (!stay) {
         mode = AppMode::Title;
         title.enter(file_exists(save_path.c_str()));

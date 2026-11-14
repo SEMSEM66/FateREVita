@@ -635,6 +635,220 @@ def build_bgm_index(
     return {"version": 1, "tracks": tracks}
 
 
+CG_CATEGORY_ORDER = (
+    "Prologue",
+    "Fate",
+    "UBW",
+    "Heaven's Feel",
+    "Last Episode",
+    "Extra",
+)
+CG_EPK_CAT_MAP = {
+    3: "Prologue",
+    0: "Fate",
+    1: "UBW",
+    2: "Heaven's Feel",
+    4: "Last Episode",
+    5: "Extra",
+}
+UE_H_GALLERY_SCRIPTS = (
+    ("セイバーギャラリー.txt", "Fate"),
+    ("凛ギャラリー.txt", "UBW"),
+    ("桜ギャラリー.txt", "Heaven's Feel"),
+)
+
+
+def extract_cg_gallery_groups(
+    p00m: Optional[StreamingFPD],
+    p00m_p: Optional[StreamingFPD],
+    ue_patch: Optional[XP3Archive],
+) -> Tuple[List[dict], Dict[str, List[str]]]:
+    """Extract CG gallery groups from Steam picture_data/picture_flag EPKs & UE H gallery."""
+    raw_groups: List[dict] = []
+
+    found_pd = find_p00_entry(p00m, p00m_p, "root/data/epk/picture_data.epk")
+    if found_pd is not None:
+        arc, ent = found_pd
+        cur: Optional[dict] = None
+        for idx, parts in enumerate(decrypt_epk_rows(arc.read_entry(ent), "picture_data")):
+            if len(parts) < 5:
+                continue
+            try:
+                cat_id = int(parts[2].strip())
+                span = int(parts[3].strip())
+            except ValueError:
+                continue
+            stem = parts[4].strip()
+            if not stem:
+                continue
+            if span > 0:
+                cur = {
+                    "category": CG_EPK_CAT_MAP.get(cat_id, "Extra"),
+                    "is_adult": False,
+                    "seq": idx,
+                    "stems": [stem],
+                }
+                raw_groups.append(cur)
+            elif cur is not None:
+                cur["stems"].append(stem)
+
+    if ue_patch is not None:
+        h_seq = 100000
+        for script_name, cat_name in UE_H_GALLERY_SCRIPTS:
+            ent = ue_patch.get_ci(script_name)
+            if ent is None:
+                continue
+            txt = decode_text(ue_patch.read_entry(ent))
+            in_h = False
+            for ln in txt.splitlines():
+                s = ln.strip()
+                if "@if" in s and "ghentai" in s:
+                    in_h = True
+                    continue
+                if in_h and "@endif" in s:
+                    in_h = False
+                    continue
+                if not in_h or not s or s.startswith("-"):
+                    continue
+                row_stems = [
+                    tok.strip().split(";")[0].lower()
+                    for tok in re.split(r"[\t\s]+", s)
+                    if tok.strip()
+                ]
+                row_stems = [st for st in row_stems if st]
+                if row_stems:
+                    raw_groups.append(
+                        {
+                            "category": cat_name,
+                            "is_adult": True,
+                            "seq": h_seq,
+                            "stems": row_stems,
+                        }
+                    )
+                    h_seq += 1
+
+    sub_unlocks: Dict[str, List[str]] = {}
+    found_pf = find_p00_entry(p00m, p00m_p, "root/data/epk/picture_flag.epk")
+    if found_pf is not None:
+        arc, ent = found_pf
+        for parts in decrypt_epk_rows(arc.read_entry(ent), "picture_flag"):
+            if len(parts) >= 3:
+                child = parts[1].strip()
+                parent = parts[2].strip()
+                if child and parent:
+                    sub_unlocks.setdefault(parent, [])
+                    if child not in sub_unlocks[parent]:
+                        sub_unlocks[parent].append(child)
+
+    cat_rank = {name: i for i, name in enumerate(CG_CATEGORY_ORDER)}
+    raw_groups.sort(key=lambda g: (cat_rank.get(g["category"], 99), g["is_adult"], g["seq"]))
+    for i, g in enumerate(raw_groups, start=1):
+        g["id"] = f"cg_{i:03d}"
+
+    return raw_groups, sub_unlocks
+
+
+def _make_gallery_thumb(src_path: Path, dst_path: Path) -> bool:
+    if not src_path.exists():
+        return False
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(src_path) as im:
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        if im.size != (160, 90):
+            im = im.resize((160, 90), Image.Resampling.LANCZOS)
+        im.save(dst_path, format="JPEG", quality=85, optimize=True)
+    return True
+
+
+def build_cg_index_and_thumbs(
+    out: Path,
+    cg_groups: List[dict],
+    cg_sub_unlocks: Dict[str, List[str]],
+    manifest_images: Dict[str, dict],
+    manifest_images_h: Dict[str, dict],
+    manifest_images_dec: Dict[str, dict],
+    skip_thumbs: bool = False,
+) -> dict:
+    """Resolve CG variant files per ContentMode, write 160x90 thumbnails, return gallery/cg_index.json."""
+
+    def pick_path(table: Dict[str, dict], stem: str) -> str:
+        ent = table.get(stem) or table.get(stem.lower())
+        return str(ent["path"]) if ent and "path" in ent else ""
+
+    cgs_out: List[dict] = []
+    thumb_jobs: List[Tuple[str, str]] = []
+
+    for g in cg_groups:
+        variants_out = []
+        for stem in g["stems"]:
+            p_all = pick_path(manifest_images, stem) or pick_path(manifest_images_h, stem)
+            p_mos = pick_path(manifest_images_h, stem) or pick_path(manifest_images, stem)
+            p_dem = (
+                pick_path(manifest_images_dec, stem)
+                or pick_path(manifest_images_h, stem)
+                or pick_path(manifest_images, stem)
+            )
+            if not (p_all or p_mos or p_dem):
+                continue
+            variants_out.append(
+                {
+                    "stem": stem,
+                    "all_ages": p_all,
+                    "mosaic": p_mos,
+                    "demosaic": p_dem,
+                }
+            )
+        if not variants_out:
+            continue
+
+        gid = g["id"]
+        v0 = variants_out[0]
+        if g["is_adult"]:
+            t_all = ""
+            t_mos = f"gallery/thumbs/{gid}_mosaic.jpg" if v0["mosaic"] else ""
+            if v0["mosaic"]:
+                thumb_jobs.append((v0["mosaic"], t_mos))
+            if v0["demosaic"] and v0["demosaic"] != v0["mosaic"]:
+                t_dem = f"gallery/thumbs/{gid}_demosaic.jpg"
+                thumb_jobs.append((v0["demosaic"], t_dem))
+            else:
+                t_dem = t_mos
+        else:
+            src_rel = v0["all_ages"] or v0["mosaic"]
+            t_all = f"gallery/thumbs/{gid}.jpg" if src_rel else ""
+            t_mos = t_all
+            t_dem = t_all
+            if src_rel:
+                thumb_jobs.append((src_rel, t_all))
+
+        cgs_out.append(
+            {
+                "id": gid,
+                "category": g["category"],
+                "is_adult": bool(g["is_adult"]),
+                "thumb_all_ages": t_all,
+                "thumb_mosaic": t_mos,
+                "thumb_demosaic": t_dem,
+                "variants": variants_out,
+            }
+        )
+
+    if not skip_thumbs:
+        made = 0
+        for src_rel, dst_rel in thumb_jobs:
+            if _make_gallery_thumb(out / src_rel, out / dst_rel):
+                made += 1
+        print(f"[GALLERY] Generated {made} 160x90 JPEG thumbnails.")
+
+    return {
+        "version": 1,
+        "categories": ["All", *CG_CATEGORY_ORDER],
+        "sub_unlocks": cg_sub_unlocks,
+        "cgs": cgs_out,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build full-game Vita assets + UE restoration.")
     parser.add_argument("--steam", type=Path, default=STEAM_DEFAULT)
@@ -655,6 +869,7 @@ def main() -> None:
         "images/h_orig",
         "images/h_demosaic",
         "images/rules",
+        "gallery/thumbs",
         "audio/bgm",
         "audio/bgm_old",
         "audio/se",
@@ -809,6 +1024,12 @@ def main() -> None:
     print(f"[FLOW] Compiled {len(manifest_flowcharts)} Steam & {len(manifest_flowcharts_h)} UE flowcharts.")
 
     # --- 4. Export Images (Steam + UE Fallbacks + Solid black/white) ---
+    cg_groups, cg_sub_unlocks = extract_cg_gallery_groups(p00m, p00m_p, ue_patch)
+    for g in cg_groups:
+        if not g["is_adult"]:
+            for stem in g["stems"]:
+                ref_images.add(stem)
+
     print(f"[IMAGES] Exporting {len(ref_images)} referenced base/UE images...")
     manifest_images: Dict[str, dict] = {}
     img_tasks: List[Tuple[str, bytes, float, bool]] = []
@@ -1107,7 +1328,20 @@ def main() -> None:
     else:
         print(f"[VOICE] Skipped {len(ref_voice)} voice exports (--no-voices set).")
 
-    # --- 9. Fonts & UI & Manifest ---
+    # --- 9. Fonts & UI & Gallery & Manifest ---
+    cg_index_obj = build_cg_index_and_thumbs(
+        out,
+        cg_groups,
+        cg_sub_unlocks,
+        manifest_images,
+        manifest_images_h,
+        manifest_images_dec,
+    )
+    (out / "gallery" / "cg_index.json").write_text(
+        json.dumps(cg_index_obj, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"[GALLERY] Wrote gallery/cg_index.json ({len(cg_index_obj['cgs'])} CG groups).")
+
     fonts, ui = copy_fonts_and_ui(out)
     manifest = {
         "slice": "full_game_ue_restoration",
@@ -1127,6 +1361,7 @@ def main() -> None:
         "bgm_old": manifest_bgm_old,
         "bgm_old_loops": manifest_bgm_old_loops,
         "bgm_index": "audio/bgm_index.json",
+        "cg_index": "gallery/cg_index.json",
         "se": manifest_se,
         "voice": manifest_voice,
         "missing": {

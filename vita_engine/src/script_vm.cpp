@@ -725,17 +725,23 @@ std::string ScriptVM::resolve_image(const std::string& raw_name) const {
     return "";
   };
 
+  std::string out;
   if (cm == ContentMode::HDemosaic) {
-    if (auto p = lookup("images_demosaic"); !p.empty()) return p;
-    if (auto p = lookup("images_h"); !p.empty()) return p;
-    return lookup("images");
+    out = lookup("images_demosaic");
+    if (out.empty()) out = lookup("images_h");
+    if (out.empty()) out = lookup("images");
+  } else if (cm == ContentMode::HMosaic) {
+    out = lookup("images_h");
+    if (out.empty()) out = lookup("images");
+  } else {
+    out = lookup("images");
+    if (out.empty()) out = lookup("images_h");
   }
-  if (cm == ContentMode::HMosaic) {
-    if (auto p = lookup("images_h"); !p.empty()) return p;
-    return lookup("images");
+
+  if (!out.empty() && extras_) {
+    extras_->mark_cg_seen(name);
   }
-  if (auto p = lookup("images"); !p.empty()) return p;
-  return lookup("images_h");
+  return out;
 }
 
 std::string ScriptVM::resolve_rule(const std::string& raw_name) const {

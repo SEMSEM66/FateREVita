@@ -14,6 +14,7 @@ enum class TitleAction {
   NewGame,
   Continue,
   MusicRoom,
+  CgGallery,
   Exit,
 };
 

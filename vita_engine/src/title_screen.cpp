@@ -99,7 +99,7 @@ TitleAction TitleScreen::update(float dt_sec, bool up, bool down, bool left, boo
   anim_time_ += dt_sec;
 
   if (sub_mode_ == SubMode::Main) {
-    const int count = 5;  // 0: New Game, 1: Continue, 2: Music Room, 3: Config, 4: Exit
+    const int count = 6;  // 0: New Game, 1: Continue, 2: Music Room, 3: CG Gallery, 4: Config, 5: Exit
     if (up) {
       do {
         selected_ = (selected_ + count - 1) % count;
@@ -118,8 +118,8 @@ TitleAction TitleScreen::update(float dt_sec, bool up, bool down, bool left, boo
       const float bw = 260.0f;
       for (int i = 0; i < count; ++i) {
         if (i == 1 && !has_save_) continue;
-        float by = 232.0f + i * 44.0f;
-        if (touch_x >= bx && touch_x <= bx + bw && touch_y >= by && touch_y <= by + 40.0f) {
+        float by = 216.0f + i * 40.0f;
+        if (touch_x >= bx && touch_x <= bx + bw && touch_y >= by && touch_y <= by + 36.0f) {
           selected_ = i;
           confirm = true;
           break;
@@ -136,12 +136,13 @@ TitleAction TitleScreen::update(float dt_sec, bool up, bool down, bool left, boo
       }
       if (selected_ == 1 && has_save_) return TitleAction::Continue;
       if (selected_ == 2) return TitleAction::MusicRoom;
-      if (selected_ == 3) {
+      if (selected_ == 3) return TitleAction::CgGallery;
+      if (selected_ == 4) {
         sub_mode_ = SubMode::ConfigMenu;
         sub_row_ = 0;
         return TitleAction::None;
       }
-      if (selected_ == 4) return TitleAction::Exit;
+      if (selected_ == 5) return TitleAction::Exit;
     }
     return TitleAction::None;
   }
@@ -218,24 +219,25 @@ void TitleScreen::draw_main() {
     renderer_->draw_texture(logo, 520.0f, 36.0f, lw, lh, 0.96f);
   }
 
-  const char* btn_tex[5][2] = {
+  const char* btn_tex[6][2] = {
       {"btn_newgame_1.png", "btn_newgame_2.png"},
       {"btn_continue_1.png", "btn_continue_2.png"},
+      {"", ""},
       {"", ""},
       {"btn_config_1.png", "btn_config_2.png"},
       {"", ""},
   };
-  const char* labels[5] = {"NEW GAME", "CONTINUE", "MUSIC ROOM", "CONFIG", "EXIT"};
+  const char* labels[6] = {"NEW GAME", "CONTINUE", "MUSIC ROOM", "CG GALLERY", "CONFIG", "EXIT"};
 
-  for (int i = 0; i < 5; ++i) {
-    float by = 232.0f + i * 44.0f;
+  for (int i = 0; i < 6; ++i) {
+    float by = 216.0f + i * 40.0f;
     bool enabled = !(i == 1 && !has_save_);
     bool sel = (selected_ == i);
     float alpha = enabled ? (sel ? 1.0f : 0.72f) : 0.30f;
 
     if (sel) {
       float glow = 0.25f + 0.12f * std::sin(anim_time_ * 4.5f);
-      renderer_->draw_rect(72.0f, by - 2.0f, 260.0f, 40.0f, 0.20f, 0.45f, 0.85f, glow);
+      renderer_->draw_rect(72.0f, by - 2.0f, 260.0f, 36.0f, 0.20f, 0.45f, 0.85f, glow);
     }
 
     const Texture* btex = nullptr;
@@ -247,7 +249,7 @@ void TitleScreen::draw_main() {
       renderer_->draw_texture(btex, 84.0f, by, static_cast<float>(btex->w),
                               static_cast<float>(btex->h), alpha);
     } else {
-      text_->draw_simple(labels[i], 96.0f, by + 6.0f, 0.92f, 1.0f, 1.0f, 1.0f, alpha);
+      text_->draw_simple(labels[i], 96.0f, by + 5.0f, 0.88f, 1.0f, 1.0f, 1.0f, alpha);
     }
   }
 
