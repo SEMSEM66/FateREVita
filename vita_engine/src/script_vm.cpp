@@ -283,10 +283,10 @@ bool ScriptVM::start_preset(int preset_index, const std::string& choice_backup_p
   }
 }
 
-bool ScriptVM::start_flowchart(const std::string& fcf_stem, int start_node) {
+std::string ScriptVM::resolve_flowchart_json_path(const std::string& fcf_stem) const {
   std::string normalized = (fcf_stem == "\xE3\x83\x97\xE3\x83\xAD\xE3\x83\xAD\xE3\x83\xBC\xE3\x82\xB0")
-                               ? "prologue"
-                               : fcf_stem;
+                                ? "prologue"
+                                : fcf_stem;
 
   const bool want_h = (config_ && config_->content_mode != ContentMode::AllAges);
   std::string rel;
@@ -297,7 +297,25 @@ bool ScriptVM::start_flowchart(const std::string& fcf_stem, int start_node) {
   } else if (manifest_.contains("flowcharts_h") && manifest_["flowcharts_h"].contains(normalized)) {
     rel = manifest_["flowcharts_h"][normalized].get<std::string>();
   }
-  if (rel.empty() || !read_json_file(data_root_ + "/" + rel, flowchart_)) {
+  return rel.empty() ? "" : (data_root_ + "/" + rel);
+}
+
+bool ScriptVM::has_script_stem(const std::string& raw_stem) const {
+  std::string stem = strip_ext(raw_stem);
+  if (stem.empty()) return false;
+  if (manifest_.contains("scripts") && manifest_["scripts"].contains(stem)) return true;
+  if (manifest_.contains("scripts_h") && manifest_["scripts_h"].contains(stem)) return true;
+  return false;
+}
+
+bool ScriptVM::start_flowchart(const std::string& fcf_stem, int start_node) {
+  std::string normalized = (fcf_stem == "\xE3\x83\x97\xE3\x83\xAD\xE3\x83\xAD\xE3\x83\xBC\xE3\x82\xB0")
+                                ? "prologue"
+                                : fcf_stem;
+
+  const bool want_h = (config_ && config_->content_mode != ContentMode::AllAges);
+  std::string full_path = resolve_flowchart_json_path(normalized);
+  if (full_path.empty() || !read_json_file(full_path, flowchart_)) {
     log::info("[VM] Flowchart not found: %s", normalized.c_str());
     return false;
   }
@@ -308,6 +326,111 @@ bool ScriptVM::start_flowchart(const std::string& fcf_stem, int start_node) {
   if (normalized == "prologue" && start_node < 0) target = 1;
   log::info("[VM] Entering flowchart '%s' at node %d (H=%d)", fcf_stem_.c_str(), target, want_h ? 1 : 0);
   return enter_fcf_node(target);
+}
+
+bool ScriptVM::jump_to_flowchart_node(const std::string& fcf_stem, int node_id) {
+  std::string normalized = (fcf_stem == "\xE3\x83\x97\xE3\x83\xAD\xE3\x83\xAD\xE3\x83\xBC\xE3\x82\xB0")
+                                ? "prologue"
+                                : fcf_stem;
+
+  const bool switching_route =
+      !in_flowchart_ || fcf_stem_.empty() ||
+      fcf_stem_.substr(0, std::min<size_t>(3, fcf_stem_.size())) !=
+          normalized.substr(0, std::min<size_t>(3, normalized.size()));
+
+  if (audio_) {
+    audio_->stop_voice();
+    audio_->stop_all_se(150);
+    audio_->stop_bgm(250);
+  }
+  cur_bgm_stem_.clear();
+  cur_bgm_playing_ = false;
+  call_stack_.clear();
+  layers_.clear();
+  credits_lines_.clear();
+  credits_active_ = false;
+  credits_scroll_ = 0.0f;
+  bg_is_solid_ = true;
+  bg_r_ = bg_g_ = bg_b_ = 0.0f;
+  bg_name_.clear();
+  bg_path_.clear();
+  bg_trans_ = BgTransition{};
+  tint_r_ = tint_g_ = tint_b_ = 1.0f;
+  darken_alpha_ = 0.0f;
+  choice_active_ = false;
+  tiger_retry_mode_ = false;
+  backlog_open_ = false;
+  backlog_scroll_ = 0;
+  text_visible_ = true;
+  user_hid_text_ = false;
+  interlude_mode_ = false;
+  wait_click_ = false;
+  wait_page_ = false;
+  wait_timer_ = 0.0f;
+  wait_move_ = false;
+  wait_trans_ = false;
+  quake_timer_ = 0.0f;
+  finished_ = false;
+  if (text_) text_->clear_page();
+
+  if (switching_route) {
+    route_flags_.clear();
+    auto ensure_min = [&](const char* flag, int val) {
+      if (get_flag(flag) < val) set_flag(flag, val);
+    };
+    ensure_min("\xE3\x82\xBB\xE3\x82\xA4\xE3\x83\x90\xE3\x83\xBC\xE5\xA5\xBD\xE6\x84\x9F\xE5\xBA\xA6", 7);
+    ensure_min("\xE5\x87\x9B\xE5\xA5\xBD\xE6\x84\x9F\xE5\xBA\xA6", 10);
+    ensure_min("\xE6\xA1\x9C\xE5\xA5\xBD\xE6\x84\x9F\xE5\xBA\xA6", 12);
+    ensure_min("\xE3\x82\xA4\xE3\x83\xAA\xE3\x83\xA4\xE5\xA5\xBD\xE6\x84\x9F\xE5\xBA\xA6", 5);
+    ensure_min("\xE9\x81\x93\xE5\xA0\xB4\xE8\xAA\xAC\xE6\x98\x8E", 1);
+  }
+
+  return start_flowchart(normalized, node_id);
+}
+
+bool ScriptVM::start_special_script(const std::string& script_stem) {
+  if (audio_) {
+    audio_->stop_voice();
+    audio_->stop_all_se(150);
+    audio_->stop_bgm(250);
+  }
+  cur_bgm_stem_.clear();
+  cur_bgm_playing_ = false;
+  in_flowchart_ = false;
+  fcf_stem_.clear();
+  fcf_node_id_ = 0;
+  call_stack_.clear();
+  layers_.clear();
+  credits_lines_.clear();
+  credits_active_ = false;
+  credits_scroll_ = 0.0f;
+  bg_is_solid_ = true;
+  bg_r_ = bg_g_ = bg_b_ = 0.0f;
+  bg_name_.clear();
+  bg_path_.clear();
+  bg_trans_ = BgTransition{};
+  tint_r_ = tint_g_ = tint_b_ = 1.0f;
+  darken_alpha_ = 0.0f;
+  choice_active_ = false;
+  tiger_retry_mode_ = false;
+  backlog_open_ = false;
+  backlog_scroll_ = 0;
+  text_visible_ = true;
+  user_hid_text_ = false;
+  interlude_mode_ = false;
+  wait_click_ = false;
+  wait_page_ = false;
+  wait_timer_ = 0.0f;
+  wait_move_ = false;
+  wait_trans_ = false;
+  quake_timer_ = 0.0f;
+  finished_ = false;
+  if (text_) text_->clear_page();
+
+  if (extras_ && !script_stem.empty()) {
+    extras_->mark_node_visited("script:" + script_stem, 0);
+  }
+  return load_script_by_stem(script_stem, "", false);
 }
 
 bool ScriptVM::enter_fcf_node(int node_id) {
@@ -325,6 +448,9 @@ bool ScriptVM::enter_fcf_node(int node_id) {
     }
 
     fcf_node_id_ = node_id;
+    if (extras_ && !fcf_stem_.empty()) {
+      extras_->mark_node_visited(fcf_stem_, node_id);
+    }
     const auto& node = nodes[key];
     std::string ntype = node.value("type", "");
 

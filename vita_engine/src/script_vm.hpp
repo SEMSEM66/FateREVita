@@ -29,9 +29,17 @@ class ScriptVM {
 
   bool start_preset(int preset_index, const std::string& choice_backup_path = "");
   bool start_flowchart(const std::string& fcf_stem, int start_node = -1);
+  bool jump_to_flowchart_node(const std::string& fcf_stem, int node_id);
+  bool start_special_script(const std::string& script_stem);
+  std::string resolve_flowchart_json_path(const std::string& fcf_stem) const;
+  bool has_script_stem(const std::string& stem) const;
   bool load_script(const std::string& rel_script_path);
   bool load_script_by_stem(const std::string& stem, const std::string& target_label = "",
                            bool preserve_scene = false);
+
+  bool in_flowchart() const { return in_flowchart_; }
+  const std::string& fcf_stem() const { return fcf_stem_; }
+  int fcf_node_id() const { return fcf_node_id_; }
 
   bool load_quicksave(const std::string& save_path);
   bool write_quicksave(const std::string& save_path) const;

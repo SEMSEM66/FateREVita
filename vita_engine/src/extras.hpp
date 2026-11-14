@@ -74,6 +74,10 @@ class ExtrasManager {
   const std::vector<CgGroupInfo>& cg_groups() const { return cg_groups_; }
   const std::vector<std::string>& cg_categories() const { return cg_categories_; }
 
+  bool mark_node_visited(const std::string& fcf_stem, int node_id);
+  bool is_node_visited(const std::string& fcf_stem, int node_id, bool unlock_all) const;
+  int visited_node_count() const { return static_cast<int>(visited_nodes_.size()); }
+
  private:
   std::string data_root_;
   std::string extras_path_;
@@ -90,6 +94,7 @@ class ExtrasManager {
   std::unordered_set<std::string> unlocked_bgm_;
   std::unordered_set<std::string> seen_cgs_;
   std::unordered_set<std::string> unlocked_movies_;
+  std::unordered_set<std::string> visited_nodes_;
 
   void load_bgm_index(const nlohmann::json& manifest);
   void load_cg_index();
@@ -187,6 +192,77 @@ class CgGalleryScreen {
   void load_viewer_variant(int pos);
   std::string resolve_group_thumb(const CgGroupInfo& g) const;
   std::string resolve_variant_path(const CgVariantInfo& v) const;
+};
+
+class FlowchartScreen {
+ public:
+  void init(const std::string& data_root, Renderer* renderer, AudioEngine* audio,
+            TextRenderer* text, AppConfig* config, const std::string& config_path,
+            ExtrasManager* extras, ScriptVM* vm, bool circle_confirm);
+  void enter(bool from_game, const std::string& current_fcf_stem, int current_node_id);
+
+  // Returns true while Flowchart stays open; false to exit back to caller.
+  // Sets jumped_to_scene = true if player jumped into a scene, choice, or bonus script.
+  bool update(float dt_sec, bool up, bool down, bool left, bool right,
+              bool confirm, bool back, bool btn_triangle, bool btn_square,
+              bool btn_l, bool btn_r, bool btn_select,
+              bool touch_tap, float touch_x, float touch_y,
+              bool& jumped_to_scene);
+  void draw();
+
+  bool opened_from_game() const { return from_game_; }
+
+ private:
+  struct DayEntry {
+    std::string fcf_stem;
+    std::string day_label;
+    std::string sub_title;
+    int root_node = 0;
+    bool is_special_script = false;
+  };
+
+  struct NodeRow {
+    int node_id = -1;
+    int target_node_id = -1;
+    std::string fcf_stem;
+    std::string badge;
+    std::string title;
+    int depth = 0;
+    bool is_current = false;
+    bool is_visited = false;
+    bool is_jumpable = false;
+    bool is_special_script = false;
+    bool is_bad_end = false;
+    bool is_good_end = false;
+  };
+
+  std::string data_root_;
+  std::string config_path_;
+  Renderer* renderer_ = nullptr;
+  AudioEngine* audio_ = nullptr;
+  TextRenderer* text_ = nullptr;
+  AppConfig* config_ = nullptr;
+  ExtrasManager* extras_ = nullptr;
+  ScriptVM* vm_ = nullptr;
+  bool circle_confirm_ = false;
+
+  bool from_game_ = false;
+  std::string active_game_fcf_;
+  int active_game_node_ = -1;
+
+  int route_tab_ = 0;  // 0=Prologue, 1=Fate, 2=UBW, 3=Heaven's Feel, 4=Special
+  int day_idx_[5] = {0, 0, 0, 0, 0};
+  int cursor_ = 0;
+  int scroll_top_ = 0;
+  float anim_time_ = 0.0f;
+  std::string status_msg_;
+
+  std::vector<DayEntry> route_days_[5];
+  std::vector<NodeRow> rows_;
+
+  void build_catalog();
+  void rebuild_day_rows();
+  void ensure_scroll_visible();
 };
 
 }  // namespace fsn

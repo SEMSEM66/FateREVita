@@ -329,8 +329,9 @@ void draw_pause_menu(fsn::Renderer& renderer, fsn::TextRenderer& text,
   text.draw_simple("Scene: " + vm.status_summary(), 170.0f, 120.0f,
                    0.72f, 0.70f, 0.78f, 0.90f, 0.90f);
 
-  const std::string items[6] = {
+  const std::string items[7] = {
       "Resume Game",
+      "Open Story Flowchart",
       std::string("Soundtrack:       < ") + config.ost_label() + " >",
       std::string("Content Edition:  < ") + config.content_label() + " >",
       "Quick Save Now",
@@ -338,15 +339,15 @@ void draw_pause_menu(fsn::Renderer& renderer, fsn::TextRenderer& text,
       "Save & Return to Title",
   };
 
-  for (int i = 0; i < 6; ++i) {
-    float ry = 158.0f + i * 44.0f;
+  for (int i = 0; i < 7; ++i) {
+    float ry = 152.0f + i * 39.0f;
     bool sel = (row == i);
-    renderer.draw_rect(164.0f, ry, 632.0f, 36.0f,
+    renderer.draw_rect(164.0f, ry, 632.0f, 33.0f,
                        sel ? 0.22f : 0.10f,
                        sel ? 0.45f : 0.14f,
                        sel ? 0.85f : 0.24f,
                        sel ? 0.85f : 0.45f);
-    text.draw_simple(items[i], 184.0f, ry + 7.0f, 0.85f,
+    text.draw_simple(items[i], 184.0f, ry + 6.0f, 0.83f,
                      1.0f, sel ? 0.98f : 0.88f, sel ? 0.75f : 0.95f, 1.0f);
   }
 
@@ -437,7 +438,11 @@ int main(int /*argc*/, char* /*argv*/[]) {
   cg_gallery.init(data_root, &renderer, &audio, &text, &config, config_path,
                   &extras, &vm, &title, circle_confirm);
 
-  enum class AppMode { BootNotice, Title, MusicRoom, CgGallery, Game };
+  fsn::FlowchartScreen flowchart;
+  flowchart.init(data_root, &renderer, &audio, &text, &config, config_path,
+                 &extras, &vm, circle_confirm);
+
+  enum class AppMode { BootNotice, Title, Flowchart, MusicRoom, CgGallery, Game };
   AppMode mode = AppMode::BootNotice;
   float boot_timer = 0.0f;
 
@@ -533,6 +538,9 @@ int main(int /*argc*/, char* /*argv*/[]) {
           if (vm.load_quicksave(save_path)) {
             mode = AppMode::Game;
           }
+        } else if (act == fsn::TitleAction::Flowchart) {
+          flowchart.enter(false, "", -1);
+          mode = AppMode::Flowchart;
         } else if (act == fsn::TitleAction::MusicRoom) {
           music_room.enter();
           mode = AppMode::MusicRoom;
@@ -541,6 +549,28 @@ int main(int /*argc*/, char* /*argv*/[]) {
           mode = AppMode::CgGallery;
         } else if (act == fsn::TitleAction::Exit) {
           running = false;
+        }
+      }
+    } else if (mode == AppMode::Flowchart) {
+      bool jumped = false;
+      bool stay = flowchart.update(
+          dt, btn_up, btn_down, btn_left, btn_right,
+          btn_sys_confirm, btn_sys_back, btn_triangle, btn_toggle_text,
+          btn_l, btn_r, btn_select,
+          touch_tap, touch_x, touch_y, jumped);
+      if (flowchart.opened_from_game()) {
+        vm.draw();
+      }
+      flowchart.draw();
+      if (!stay) {
+        if (jumped) {
+          pause_open = false;
+          mode = AppMode::Game;
+        } else if (flowchart.opened_from_game()) {
+          pause_open = true;
+          mode = AppMode::Game;
+        } else {
+          mode = AppMode::Title;
         }
       }
     } else if (mode == AppMode::MusicRoom) {
@@ -568,19 +598,19 @@ int main(int /*argc*/, char* /*argv*/[]) {
     } else if (mode == AppMode::Game) {
       if (pause_open) {
         if (btn_up) {
-          pause_row = (pause_row + 5) % 6;
+          pause_row = (pause_row + 6) % 7;
           pause_feedback.clear();
           audio.play_se("ui_move", data_root + "/audio/se/se_title_move.ogg");
         }
         if (btn_down) {
-          pause_row = (pause_row + 1) % 6;
+          pause_row = (pause_row + 1) % 7;
           pause_feedback.clear();
           audio.play_se("ui_move", data_root + "/audio/se/se_title_move.ogg");
         }
-        bool adj = (btn_left || btn_right || btn_sys_confirm) && (pause_row == 1 || pause_row == 2);
+        bool adj = (btn_left || btn_right || btn_sys_confirm) && (pause_row == 2 || pause_row == 3);
         if (adj) {
           int dir = btn_left ? -1 : 1;
-          if (pause_row == 1) {
+          if (pause_row == 2) {
             config.ost_mode = (config.ost_mode == fsn::OstMode::New)
                                   ? fsn::OstMode::Old
                                   : fsn::OstMode::New;
@@ -595,14 +625,19 @@ int main(int /*argc*/, char* /*argv*/[]) {
         } else if (btn_sys_confirm) {
           if (pause_row == 0) {
             pause_open = false;
-          } else if (pause_row == 3) {
+          } else if (pause_row == 1) {
+            std::string cur_fcf = vm.in_flowchart() ? vm.fcf_stem() : vm.status_summary();
+            flowchart.enter(true, cur_fcf, vm.fcf_node_id());
+            pause_open = false;
+            mode = AppMode::Flowchart;
+          } else if (pause_row == 4) {
             vm.write_quicksave(save_path);
             pause_feedback = "Quick-saved to save0.json!";
             audio.play_se("ui_decide", data_root + "/audio/se/se_title_decide.ogg");
-          } else if (pause_row == 4) {
+          } else if (pause_row == 5) {
             pause_open = false;
             vm.set_backlog_open(true);
-          } else if (pause_row == 5) {
+          } else if (pause_row == 6) {
             vm.write_quicksave(save_path);
             pause_open = false;
             audio.stop_all_se(200);

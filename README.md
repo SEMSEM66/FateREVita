@@ -36,10 +36,11 @@ A native PS Vita port and PC asset pipeline for **Fate/stay night REMASTERED** (
   - `18+ (Original Mosaic)` — Restored adult scenes & original mosaic CGs
   - `18+ (Uncensored)` — Restored adult scenes & demosaic-patched CGs (`decensor_config.dic`)
 - **In-Game Menus & QoL:**
-  - Startup configuration panel & persistent settings (`ux0:data/FateReVita/config.json`)
+  - Authentic *Fate/stay night REMASTERED* New Game progression (starts straight into Prologue -> Fate -> Unlimited Blade Works -> Heaven's Feel with persistent global route clear flags)
+  - Interactive **Story Flowchart** screen accessible from both the Title Screen (`FLOWCHART`) and In-Game `START` Pause Menu (`Open Story Flowchart`): browse all routes (`Prologue`, `Fate`, `UBW`, `Heaven's Feel`, and `Special` bonus episodes: `Last Episode`, `Special Tiger Dojo`, `Mini Theater 1–3`), switch days, inspect choices/Tiger Dojos/endings in reading order with `[CURRENT]` and `[SEEN]` tracking persisted in `extras.json`, toggle `Unlock All` (`Select`), and jump directly into any unlocked scene or choice
+  - Startup & Title configuration panel + persistent settings (`ux0:data/FateReVita/config.json`)
   - Quick-Save / `Continue` (`ux0:data/FateReVita/save0.json`)
-  - `START` Pause Menu to switch Soundtrack or Content Mode on the fly, Quick-Save, view Backlog, or return to Title
-  - Authentic Fate/stay night REMASTERED route progression (Prologue -> Fate -> Unlimited Blade Works -> Heaven's Feel)
+  - `START` Pause Menu to open the Story Flowchart, switch Soundtrack or Content Mode on the fly, Quick-Save, view Backlog, or return to Title
   - Region-aware Circle / Cross confirm button detection (`sceAppUtilSystemParamGetInt`)
   - Built-in USTAR `.tar` installer on boot: extracts `ux0:data/FateReVita_base.tar` and indexes `ux0:data/FateReVita_voice.tar` in-place (`audio/voice.tar` + `audio/voice.idx`) so 28k+ voice lines stream without extracting tens of thousands of loose files onto FAT32/exFAT
 - **Opening Video Playback (`playmovie`):**
@@ -53,7 +54,8 @@ A native PS Vita port and PC asset pipeline for **Fate/stay night REMASTERED** (
 
 ### Known Limitations
 
-- Video playback (`SceVideodec` hardware decoding, CDRAM/PHYCONT memory thresholds, and A/V clock sync), Music Room, and CG Gallery were compiled with VitaSDK and verified on PC pipeline outputs, and still require testing on real PS Vita hardware or Vita3K.
+- The engine compiles cleanly with VitaSDK and launches on real PS Vita hardware (`FSNRV0001`), while full playthrough coverage across all late-route scenes, H-scene restoration edge cases, and Video/Flowchart/Music Room/CG Gallery interactions on real Vita / Vita3K still awaits community playtesting.
+- Multiple numbered save slots are not yet implemented beyond Quick-Save (`save0.json`) + Flowchart scene jumping.
 - Route endings run via the in-engine scripted `staffroll.ks` credits rather than pre-rendered ED movies.
 
 ---
@@ -62,13 +64,13 @@ A native PS Vita port and PC asset pipeline for **Fate/stay night REMASTERED** (
 
 | Input | Action |
 | :--- | :--- |
-| **D-Pad** | Navigate menus / choices / extras lists & grids / scroll Backlog |
-| **Cross / Circle** | Advance dialogue / confirm or go back (region-aware in submenus, pause & extras) |
-| **Triangle** | Open / close Backlog in-game; Play/Pause in Music Room; switch Content Mode in CG Gallery |
-| **Square** | Toggle dialogue box or Gallery HUD overlay; toggle New/Old OST in Music Room |
-| **L / R Triggers** | Hold `R` to skip text in-game; switch Music Room tracks / CG categories & variants |
-| **Start / Select** | `Start` opens Pause menu in-game (or toggles Music Room Loop); `Select` toggles Unlock All in extras |
-| **Front Touchscreen** | Advance dialogue, pick choices, tap Gallery thumbnails / Music Room controls, or tap to skip videos |
+| **D-Pad** | Navigate menus / choices / Flowchart nodes & days (`Left/Right`) / extras lists & grids / scroll Backlog |
+| **Cross / Circle** | Advance dialogue / jump to Flowchart node / confirm or go back (region-aware in submenus, pause, Flowchart & extras) |
+| **Triangle** | Open / close Backlog in-game; Play/Pause in Music Room; switch Content Mode in CG Gallery; Back in Flowchart |
+| **Square** | Toggle dialogue box or Gallery HUD overlay; toggle New/Old OST in Music Room; Page Down in Flowchart |
+| **L / R Triggers** | Hold `R` to fast-forward text in-game; switch Flowchart route tabs / Music Room tracks / CG categories & variants |
+| **Start / Select** | `Start` opens Pause menu in-game (or toggles Music Room Loop); `Select` toggles Unlock All in Flowchart, Gallery & Music Room |
+| **Front Touchscreen** | Advance dialogue, pick choices, tap Flowchart tabs/days/nodes, Gallery thumbnails / Music Room controls, or tap to skip videos |
 
 ---
 
