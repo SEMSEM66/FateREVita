@@ -132,3 +132,14 @@ The pipeline also generates `audio/bgm_index.json`, `gallery/cg_index.json` with
 1. Install `FateReVita.vpk` (from [Releases](https://github.com/SEMSEM66/FateREVita/releases) or built via `./vita_engine/build_wsl.sh`) using **VitaShell**.
 2. Transfer `dist/FateReVita_base.tar` and `dist/FateReVita_voice.tar` to `ux0:data/` via VitaShell USB or FTP (or copy the contents of `vita_data_full/` directly into `ux0:data/FateReVita/` if using `--no-tar`).
 3. Launch **Fate/stay night REMASTERED** on the Vita — it will unpack the base files and index `voice.tar` directly on boot (`audio/voice.tar` + `audio/voice.idx`).
+
+---
+
+## Credits
+
+- **The port.** The native PS Vita C++17 / `vitaGL` engine (`vita_engine/`) and PC asset conversion pipeline (`pipeline/`) are original work in **SEMSEM66/FateREVita** to run *Fate/stay night REMASTERED* with *Réalta Nua Ultimate Edition* restorations natively at `960x544`.
+- **The game.** *Fate/stay night* and *Fate/stay night REMASTERED*, along with all of its story, art, music, video, and voices, belong to TYPE-MOON, Aniplex, and the other rights holders. This project is unofficial and non-commercial, and is not affiliated with or endorsed by them. Please support the official release.
+- **Restoration & patches.** The Steam official English script and HD assets come from the player's legally owned copy of *Fate/stay night REMASTERED*; the 18+ scene restoration, uncensor config (`decensor_config.dic`), and 2004/PS2 soundtrack with `.sli` loop points are sourced from the *Fate/stay night [Réalta Nua] Ultimate Edition* community patch.
+- **Built on.** Built with [VitaSDK](https://vitasdk.org/), `vitaGL`, `vitashark`, `SceShaccCg`, `SceVideodec`, FreeType, `libpng`, `libvorbisfile`, `nlohmann/json` (`third_party/json.hpp`), and `stb_image` (`third_party/stb_image.h`). Offline PC conversion uses Python, Pillow, FFmpeg, and external decryption tools (`FSN-Remastered-Decompiler` and `FSNr_tools`).
+- **Fonts.** Uses `HelveticaNeueWorld-55Roman.otf` extracted locally from the user's own Steam *Fate/stay night REMASTERED* (`Blade/`) installation; no copyrighted fonts are included in this repository.
+- **How it was written.** Built with AI coding assistance (Google DeepMind's Antigravity / Gemini) under human direction: the goals, product decisions, and real PS Vita hardware testing were human, and most of the code was written by the AI.
