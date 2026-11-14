@@ -6,6 +6,25 @@ A native PS Vita port and PC asset pipeline for **Fate/stay night REMASTERED** (
 
 ---
 
+## Quick Start — How to Install on PS Vita
+
+1. **Download & Install `FateReVita.vpk` on your PS Vita**
+   - Download `FateReVita.vpk` from the [Releases](https://github.com/SEMSEM66/FateREVita/releases) page.
+   - Copy it to your PS Vita (`ux0:`) and install it via **VitaShell**.
+   - *(Standard `vitaGL` requirement: ensure `libshacccg.suprx` is installed in `ur0:data/` or `ux0:data/`.)*
+2. **Generate the Vita Data Files on PC (1 Command)**
+   - Ensure the [Prerequisites](#prerequisites) below (Python 3.10+ with Pillow, `ffmpeg`, external decryption tools in `tools/`, and your legally owned Steam + Ultimate Edition game folders) are ready.
+   - Run the single pipeline command:
+     ```bash
+     python pipeline/build_full.py --steam "<path-to-Blade>" --ue "<path-to-Ultimate-Edition>"
+     ```
+   - This converts all scripts, 960x544 graphics, soundtracks, 28k+ voices, gallery thumbnails, and opening movies (`op01`–`op03`), then automatically packs `dist/FateReVita_base.tar` and `dist/FateReVita_voice.tar`.
+3. **Transfer Data to PS Vita & Play**
+   - Open **VitaShell** -> connect USB (or FTP) and copy both `dist/FateReVita_base.tar` and `dist/FateReVita_voice.tar` directly into `ux0:data/` on your Vita.
+   - Launch **Fate/stay night REMASTERED** from LiveArea. On first launch it automatically unpacks `FateReVita_base.tar` into `ux0:data/FateReVita/` and indexes `FateReVita_voice.tar` in-place (cleaning up the `.tar` installer step smoothly).
+
+---
+
 ## Features
 
 - **Full Game Support:** Prologue (Days 1–3), **Fate**, **Unlimited Blade Works**, **Heaven's Feel**, **Last Episode**, and **Tiger Dojo** retry prompts.
@@ -98,16 +117,16 @@ python pipeline/build_full.py --steam "<path-to-Blade>" --ue "<path-to-Ultimate-
 Useful flags:
 - `--no-voices`: Skip exporting 28k+ voice lines for fast engine tests
 - `--no-video`: Skip `ffmpeg` movie transcoding (`op01`–`op03`) if `ffmpeg` is not installed or you want faster builds
+- `--no-tar`: Skip automatically packing `dist/FateReVita_base.tar` and `dist/FateReVita_voice.tar`
 - `--out <dir>`: Output directory (default: `vita_data_full`)
 - `--workers <n>`: Thread worker count (default: `12`)
 
-The pipeline also generates `audio/bgm_index.json`, `gallery/cg_index.json` with `160x90` JPEG thumbnails under `gallery/thumbs/`, and (if `dist/` exists) repacks `dist/FateReVita_base.tar` automatically so extras and transcoded videos are included.
+The pipeline also generates `audio/bgm_index.json`, `gallery/cg_index.json` with `160x90` JPEG thumbnails under `gallery/thumbs/`, extracts fonts/UI directly from `Blade/`, and automatically packs `dist/FateReVita_base.tar` and `dist/FateReVita_voice.tar` unless `--no-tar` is passed.
 
 ---
 
 ## Deploying to PS Vita
 
-1. Install `FateReVita.vpk` using **VitaShell**.
-2. Transfer `vita_data_full/` to `ux0:data/FateReVita/`:
-   - **Direct copy (USB / FTP):** Copy the contents of `vita_data_full/` directly into `ux0:data/FateReVita/`.
-   - **Fast `.tar` installer:** Pack uncompressed POSIX USTAR archives `FateReVita_base.tar` (everything except `audio/voice/`) and `FateReVita_voice.tar` (`audio/voice/*.ogg` / `.wav`) into `ux0:data/` via VitaShell FTP/USB, then launch **Fate/stay night REMASTERED** on the Vita — it will unpack the base files and index `voice.tar` directly on boot.
+1. Install `FateReVita.vpk` (from [Releases](https://github.com/SEMSEM66/FateREVita/releases) or built via `./vita_engine/build_wsl.sh`) using **VitaShell**.
+2. Transfer `dist/FateReVita_base.tar` and `dist/FateReVita_voice.tar` to `ux0:data/` via VitaShell USB or FTP (or copy the contents of `vita_data_full/` directly into `ux0:data/FateReVita/` if using `--no-tar`).
+3. Launch **Fate/stay night REMASTERED** on the Vita — it will unpack the base files and index `voice.tar` directly on boot (`audio/voice.tar` + `audio/voice.idx`).

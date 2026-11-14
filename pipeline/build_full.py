@@ -492,30 +492,146 @@ def decrypt_all_us_epks(
     return merged
 
 
-def copy_fonts_and_ui(out_dir: Path) -> Tuple[Dict[str, str], Dict[str, dict]]:
-    """Reuse clean pre-extracted Vita fonts & UI from vita_data/."""
-    src_manifest = ROOT / "vita_data" / "manifest.json"
-    if not src_manifest.exists():
-        raise FileNotFoundError(f"Expected {src_manifest} for UI & font extraction.")
-    sm = json.loads(src_manifest.read_text(encoding="utf-8"))
+def copy_fonts_and_ui(
+    out_dir: Path,
+    steam_dir: Optional[Path] = None,
+    p00m: Optional[StreamingFPD] = None,
+    p00m_p: Optional[StreamingFPD] = None,
+    pack_idx: Optional[dict] = None,
+    pack_lower: Optional[dict] = None,
+    key: Optional[bytes] = None,
+    manifest_se: Optional[Dict[str, str]] = None,
+) -> Tuple[Dict[str, str], Dict[str, dict]]:
+    """Copy Vita fonts & UI from vita_data/ if present, or extract directly from Steam Blade/."""
     fonts: Dict[str, str] = {}
     ui: Dict[str, dict] = {}
     (out_dir / "fonts").mkdir(parents=True, exist_ok=True)
     (out_dir / "images" / "ui").mkdir(parents=True, exist_ok=True)
+    (out_dir / "audio" / "se").mkdir(parents=True, exist_ok=True)
 
-    for k, rel in sm["fonts"].items():
-        src = ROOT / "vita_data" / rel
-        dst = out_dir / rel
-        shutil.copy2(src, dst)
-        fonts[k] = rel
+    src_manifest = ROOT / "vita_data" / "manifest.json"
+    m_entries: Optional[Dict[str, Tuple[StreamingFPD, object]]] = None
 
-    for k, info in sm["ui"].items():
-        rel = info["path"]
-        src = ROOT / "vita_data" / rel
-        dst = out_dir / rel
-        shutil.copy2(src, dst)
-        ui[k] = dict(info)
+    def get_m_entries() -> Dict[str, Tuple[StreamingFPD, object]]:
+        nonlocal m_entries
+        if m_entries is not None:
+            return m_entries
+        m_entries = {}
+        arcs: List[StreamingFPD] = []
+        if steam_dir is not None and key is not None:
+            for boot_cand in (steam_dir / "boot.dat", steam_dir / "obb" / "boot.dat"):
+                if boot_cand.exists():
+                    arcs.append(StreamingFPD(boot_cand, key))
+                    break
+        if p00m is not None:
+            arcs.append(p00m)
+        if p00m_p is not None:
+            arcs.append(p00m_p)
+        for arc in arcs:
+            for e in arc.entries:
+                m_entries[e.filepath] = (arc, e)
+        return m_entries
 
+    def ensure_title_se() -> None:
+        title_se_items = [
+            ("se_title_decide", "root/data/fuzz/release/root/resident/sound/se14_decide_title.fcd"),
+            ("se_title_move", "root/data/fuzz/release/root/resident/sound/se16_btnon_title.fcd"),
+        ]
+        for alias, mpath in title_se_items:
+            rel = f"audio/se/{alias}.ogg"
+            dst = out_dir / rel
+            if not dst.exists() or dst.stat().st_size == 0:
+                src_slice = ROOT / "vita_data" / rel
+                if src_slice.exists():
+                    shutil.copy2(src_slice, dst)
+                else:
+                    pair = get_m_entries().get(mpath)
+                    if pair is not None:
+                        raw = pair[0].read_entry(pair[1])
+                        ogg, _ext = decode_steam_audio(raw)
+                        dst.write_bytes(ogg)
+            if manifest_se is not None and dst.exists() and dst.stat().st_size > 0:
+                manifest_se[alias] = rel
+
+    if src_manifest.exists():
+        sm = json.loads(src_manifest.read_text(encoding="utf-8"))
+        for k, rel in sm["fonts"].items():
+            src = ROOT / "vita_data" / rel
+            dst = out_dir / rel
+            shutil.copy2(src, dst)
+            fonts[k] = rel
+
+        for k, info in sm["ui"].items():
+            rel = info["path"]
+            src = ROOT / "vita_data" / rel
+            dst = out_dir / rel
+            shutil.copy2(src, dst)
+            ui[k] = dict(info)
+
+        ensure_title_se()
+        return fonts, ui
+
+    if steam_dir is None or key is None or pack_idx is None or pack_lower is None:
+        raise FileNotFoundError(
+            f"Expected {src_manifest} or Steam Blade/ archive context for UI & font extraction."
+        )
+
+    print("[UI] vita_data/ not found; extracting fonts & UI directly from Steam Blade/...")
+    entries_map = get_m_entries()
+
+    for font_name in (
+        "HelveticaNeueWorld-55Roman.otf",
+        "FOT-TsukuMinPr6N-M.otf",
+        "FOT-UDKakugo_LargePr6-M.otf",
+    ):
+        pair = entries_map.get(f"root/data/fuzz/release/root/resident/gui/font/{font_name}")
+        if pair is not None:
+            rel = f"fonts/{font_name}"
+            (out_dir / rel).write_bytes(pair[0].read_entry(pair[1]))
+            fonts[font_name] = rel
+
+    for alias, (pname, scale) in {
+        "tw_normal_us": ("tw_ノーマル(通常)_us", 0.5),
+        "tw_interlude_us": ("tw_インタールード_us", 0.5),
+        "tw_normal_thin": ("tw_ノーマル(薄い)", 0.5),
+    }.items():
+        ent = None
+        for ext in ("webp", "png"):
+            ent = pack_idx.get((pname, ext)) or pack_lower.get((pname.lower(), ext))
+            if ent is not None:
+                break
+        if ent is not None:
+            raw = read_pack_asset(ent, key)
+            fext, w, h = export_image_bytes(raw, out_dir / "images" / "ui" / alias, scale, force_png=True)
+            ui[alias] = {"path": f"images/ui/{alias}{fext}", "w": w, "h": h}
+
+    ui_m_items = [
+        ("boot_attention_us", "root/data/bootlogo/attention_us.png", 0.5),
+        ("title_bg_01", "root/data/fuzz/release/root/resident/gui/textures/02_title/title_01.png", 0.75),
+        ("title_bg_02", "root/data/fuzz/release/root/resident/gui/textures/02_title/title_02.png", 0.75),
+        ("title_bg_03", "root/data/fuzz/release/root/resident/gui/textures/02_title/title_03.png", 0.75),
+        ("title_logo", "root/data/fuzz/release/root/resident/gui/textures/02_title/mainlogo.png", 0.75),
+        ("title_press_1", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_press_1.png", 0.75),
+        ("title_press_2", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_press_2.png", 0.75),
+        ("btn_newgame_1", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_newgame_1.png", 1.0),
+        ("btn_newgame_2", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_newgame_2.png", 1.0),
+        ("btn_continue_1", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_continue_1.png", 1.0),
+        ("btn_continue_2", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_continue_2.png", 1.0),
+        ("btn_load_1", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_load_1.png", 1.0),
+        ("btn_load_2", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_load_2.png", 1.0),
+        ("btn_config_1", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_config_1.png", 1.0),
+        ("btn_config_2", "root/data/fuzz/release/root/resident/gui/textures/02_title/t_config_2.png", 1.0),
+        ("linebreak_a", "root/data/fuzz/release/root/resident/LineBreak_a.png", 0.5),
+        ("pagebreak_a", "root/data/fuzz/release/root/resident/PageBreak_a.png", 0.5),
+    ]
+    for alias, mpath, scale in ui_m_items:
+        pair = entries_map.get(mpath)
+        if pair is not None:
+            raw = pair[0].read_entry(pair[1])
+            fext, w, h = export_image_bytes(raw, out_dir / "images" / "ui" / alias, scale, force_png=True)
+            ui[alias] = {"path": f"images/ui/{alias}{fext}", "w": w, "h": h}
+
+    ensure_title_se()
     return fonts, ui
 
 
@@ -1152,6 +1268,29 @@ def pack_base_tar(out: Path, tar_path: Path) -> int:
     return len(files)
 
 
+def pack_voice_tar(out: Path, tar_path: Path) -> int:
+    """Pack uncompressed USTAR voice archive (audio/voice/*) for in-place Vita indexing."""
+    voice_dir = out / "audio" / "voice"
+    if not voice_dir.exists():
+        return 0
+    files: List[Tuple[str, Path]] = []
+    for f in voice_dir.rglob("*"):
+        if f.is_file():
+            files.append((f.relative_to(out).as_posix(), f))
+    if not files:
+        return 0
+    files.sort(key=lambda item: item[0])
+
+    tar_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_tar = tar_path.with_suffix(".tar.tmp")
+    with tarfile.open(tmp_tar, "w", format=tarfile.USTAR_FORMAT) as tf:
+        for rel, fpath in files:
+            tf.add(fpath, arcname=rel, recursive=False)
+    tmp_tar.replace(tar_path)
+    print(f"[TAR] Packed {len(files)} voices into {tar_path} ({tar_path.stat().st_size / (1024 * 1024):.1f} MB)")
+    return len(files)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build full-game Vita assets + UE restoration.")
     parser.add_argument("--steam", type=Path, default=STEAM_DEFAULT)
@@ -1160,6 +1299,11 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=ROOT / "vita_data_full")
     parser.add_argument("--no-voices", action="store_true", help="Skip 28k voice exports for rapid tests")
     parser.add_argument("--no-video", action="store_true", help="Skip ffmpeg movie transcoding")
+    parser.add_argument(
+        "--no-tar",
+        action="store_true",
+        help="Skip packing dist/FateReVita_base.tar and dist/FateReVita_voice.tar",
+    )
     parser.add_argument("--workers", type=int, default=12)
     args = parser.parse_args()
 
@@ -1661,7 +1805,16 @@ def main() -> None:
     )
     print(f"[GALLERY] Wrote gallery/cg_index.json ({len(cg_index_obj['cgs'])} CG groups).")
 
-    fonts, ui = copy_fonts_and_ui(out)
+    fonts, ui = copy_fonts_and_ui(
+        out,
+        steam_dir=args.steam,
+        p00m=p00m,
+        p00m_p=p00m_p,
+        pack_idx=pack_idx,
+        pack_lower=pack_lower,
+        key=key,
+        manifest_se=manifest_se,
+    )
     manifest = {
         "slice": "full_game_ue_restoration",
         "vita_resolution": [960, 544],
@@ -1693,9 +1846,12 @@ def main() -> None:
     }
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
-    dist_dir = ROOT / "dist"
-    if dist_dir.exists():
+    if not args.no_tar:
+        dist_dir = ROOT / "dist"
         pack_base_tar(out, dist_dir / "FateReVita_base.tar")
+        voice_tar = dist_dir / "FateReVita_voice.tar"
+        if not args.no_voices and manifest_voice and (not voice_tar.exists() or voice_tar.stat().st_size == 0):
+            pack_voice_tar(out, voice_tar)
 
     # Summary sizes
     total_bytes = sum(f.stat().st_size for f in out.rglob("*") if f.is_file() and ".cache" not in f.parts)
