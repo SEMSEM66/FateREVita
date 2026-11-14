@@ -6,36 +6,41 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 _DEFAULT_TOOLS_DIR = (
     Path(__file__).resolve().parent.parent / "tools" / "FSNr_tools" / "build"
 )
 
 
-def parse_epk_dat_text(text: str) -> Dict[str, str]:
-    """Parse decrypted EPK DAT text into {label: value}."""
+def parse_epk_dat_rows(text: str) -> List[List[str]]:
+    """Parse decrypted EPK DAT text into raw column lists per data row."""
     lines = text.splitlines()
     if not lines or not lines[0].startswith("DAT"):
         raise ValueError("Unexpected EPK decrypted format (missing DAT header)")
-    result: Dict[str, str] = {}
+    rows: List[List[str]] = []
     for line in lines[2:]:
-        if not line:
+        if not line.strip():
             continue
-        parts = line.split("::")
+        rows.append(line.split("::"))
+    return rows
+
+
+def parse_epk_dat_text(text: str) -> Dict[str, str]:
+    """Parse decrypted EPK DAT text into {label: value}."""
+    result: Dict[str, str] = {}
+    for parts in parse_epk_dat_rows(text):
         if len(parts) >= 3:
-            label = parts[1]
-            val = parts[2]
-            result[label] = val
+            result[parts[1]] = parts[2]
     return result
 
 
-def decrypt_epk_bytes(
+def decrypt_epk_rows(
     epk_bytes: bytes,
     stem: str,
     tools_dir: Path = _DEFAULT_TOOLS_DIR,
-) -> Dict[str, str]:
-    """Decrypt raw .epk bytes given the EPK stem (26-char hash or name like 'uistring')."""
+) -> List[List[str]]:
+    """Decrypt raw .epk bytes and return raw split('::') rows."""
     main_exe = tools_dir / "main.exe"
     some_key = tools_dir / "SomeKey.bin"
     if not main_exe.exists() or not some_key.exists():
@@ -58,4 +63,17 @@ def decrypt_epk_bytes(
                 f"main.exe dec failed for {stem} (rc={proc.returncode}): {proc.stdout}\n{proc.stderr}"
             )
         txt = out_file.read_text(encoding="utf-8", errors="replace")
-    return parse_epk_dat_text(txt)
+    return parse_epk_dat_rows(txt)
+
+
+def decrypt_epk_bytes(
+    epk_bytes: bytes,
+    stem: str,
+    tools_dir: Path = _DEFAULT_TOOLS_DIR,
+) -> Dict[str, str]:
+    """Decrypt raw .epk bytes given the EPK stem (26-char hash or name like 'uistring')."""
+    result: Dict[str, str] = {}
+    for parts in decrypt_epk_rows(epk_bytes, stem, tools_dir):
+        if len(parts) >= 3:
+            result[parts[1]] = parts[2]
+    return result

@@ -1,4 +1,5 @@
 #include "script_vm.hpp"
+#include "extras.hpp"
 #include "log.hpp"
 
 #include <psp2/io/stat.h>
@@ -90,12 +91,14 @@ float apply_accel(float t, float accel) {
 }  // namespace
 
 bool ScriptVM::init(const std::string& data_root, Renderer* renderer, AudioEngine* audio,
-                    TextRenderer* text, AppConfig* config, const std::string& global_flags_path) {
+                    TextRenderer* text, AppConfig* config, const std::string& global_flags_path,
+                    ExtrasManager* extras) {
   data_root_ = data_root;
   renderer_ = renderer;
   audio_ = audio;
   text_ = text;
   config_ = config;
+  extras_ = extras;
   global_flags_path_ = global_flags_path;
 
   if (!read_json_file(data_root_ + "/manifest.json", manifest_)) {
@@ -745,15 +748,15 @@ std::string ScriptVM::resolve_rule(const std::string& raw_name) const {
   return "";
 }
 
-std::string ScriptVM::resolve_audio(const std::string& cat, const std::string& raw_name,
-                                    int64_t* loop_start, int64_t* loop_len) const {
+std::string ScriptVM::resolve_bgm_for_ost(const std::string& raw_name, OstMode ost,
+                                            int64_t* loop_start, int64_t* loop_len) const {
   if (loop_start) *loop_start = 0;
   if (loop_len) *loop_len = 0;
   std::string stem = to_lower_ascii(normalize_asset_stem(raw_name));
   if (stem.empty()) return "";
 
-  if (cat == "bgm" && config_ && config_->ost_mode == OstMode::Old &&
-      manifest_.contains("bgm_old") && manifest_["bgm_old"].contains(stem)) {
+  if (ost == OstMode::Old && manifest_.contains("bgm_old") &&
+      manifest_["bgm_old"].contains(stem)) {
     if (loop_start && loop_len && manifest_.contains("bgm_old_loops") &&
         manifest_["bgm_old_loops"].contains(stem)) {
       const auto& arr = manifest_["bgm_old_loops"][stem];
@@ -764,6 +767,23 @@ std::string ScriptVM::resolve_audio(const std::string& cat, const std::string& r
     }
     return data_root_ + "/" + manifest_["bgm_old"][stem].get<std::string>();
   }
+
+  if (manifest_.contains("bgm") && manifest_["bgm"].contains(stem)) {
+    return data_root_ + "/" + manifest_["bgm"][stem].get<std::string>();
+  }
+  return "";
+}
+
+std::string ScriptVM::resolve_audio(const std::string& cat, const std::string& raw_name,
+                                    int64_t* loop_start, int64_t* loop_len) const {
+  if (cat == "bgm") {
+    return resolve_bgm_for_ost(raw_name, config_ ? config_->ost_mode : OstMode::New,
+                               loop_start, loop_len);
+  }
+  if (loop_start) *loop_start = 0;
+  if (loop_len) *loop_len = 0;
+  std::string stem = to_lower_ascii(normalize_asset_stem(raw_name));
+  if (stem.empty()) return "";
 
   if (!manifest_.contains(cat)) return "";
   const auto& map = manifest_[cat];
@@ -785,6 +805,9 @@ std::string ScriptVM::resolve_ui(const std::string& alias) const {
 void ScriptVM::play_bgm_stem(const std::string& stem, int fade_ms) {
   std::string s = to_lower_ascii(normalize_asset_stem(stem));
   if (s.empty()) return;
+  if (extras_) {
+    extras_->unlock_bgm(s);
+  }
   cur_bgm_stem_ = s;
   cur_bgm_playing_ = true;
   int64_t lstart = 0, llen = 0;

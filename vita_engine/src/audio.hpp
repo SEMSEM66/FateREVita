@@ -16,6 +16,11 @@ class AudioEngine {
                 int64_t loop_start = 0, int64_t loop_len = 0);
   void stop_bgm(int fade_ms = 0);
   void fade_bgm(int target_pct, int time_ms);
+  void set_bgm_paused(bool paused);
+  void set_bgm_loop(bool loop);
+  bool is_bgm_paused() const;
+  bool is_bgm_playing() const;
+  double get_bgm_time_sec() const;
 
   void play_voice(const std::string& path);
   void stop_voice();

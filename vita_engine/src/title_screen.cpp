@@ -84,9 +84,10 @@ void TitleScreen::adjust_option(bool is_setup, int row, int dir) {
   } else if (is_setup && row == 3) {
     start_preset_ = wrap_idx(start_preset_, dir, kNumStartPresets);
   } else if (!is_setup) {
-    if (row == 3) config_->bgm_vol = step_vol(config_->bgm_vol, dir);
-    if (row == 4) config_->se_vol = step_vol(config_->se_vol, dir);
-    if (row == 5) config_->voice_vol = step_vol(config_->voice_vol, dir);
+    if (row == 3) config_->unlock_all_extras = !config_->unlock_all_extras;
+    if (row == 4) config_->bgm_vol = step_vol(config_->bgm_vol, dir);
+    if (row == 5) config_->se_vol = step_vol(config_->se_vol, dir);
+    if (row == 6) config_->voice_vol = step_vol(config_->voice_vol, dir);
     apply_volumes();
   }
   audio_->play_se("ui_move", data_root_ + "/audio/se/se_title_move.ogg");
@@ -98,7 +99,7 @@ TitleAction TitleScreen::update(float dt_sec, bool up, bool down, bool left, boo
   anim_time_ += dt_sec;
 
   if (sub_mode_ == SubMode::Main) {
-    const int count = 4;  // 0: New Game, 1: Continue, 2: Config, 3: Exit
+    const int count = 5;  // 0: New Game, 1: Continue, 2: Music Room, 3: Config, 4: Exit
     if (up) {
       do {
         selected_ = (selected_ + count - 1) % count;
@@ -117,8 +118,8 @@ TitleAction TitleScreen::update(float dt_sec, bool up, bool down, bool left, boo
       const float bw = 260.0f;
       for (int i = 0; i < count; ++i) {
         if (i == 1 && !has_save_) continue;
-        float by = 256.0f + i * 54.0f;
-        if (touch_x >= bx && touch_x <= bx + bw && touch_y >= by && touch_y <= by + 46.0f) {
+        float by = 232.0f + i * 44.0f;
+        if (touch_x >= bx && touch_x <= bx + bw && touch_y >= by && touch_y <= by + 40.0f) {
           selected_ = i;
           confirm = true;
           break;
@@ -134,19 +135,20 @@ TitleAction TitleScreen::update(float dt_sec, bool up, bool down, bool left, boo
         return TitleAction::None;
       }
       if (selected_ == 1 && has_save_) return TitleAction::Continue;
-      if (selected_ == 2) {
+      if (selected_ == 2) return TitleAction::MusicRoom;
+      if (selected_ == 3) {
         sub_mode_ = SubMode::ConfigMenu;
         sub_row_ = 0;
         return TitleAction::None;
       }
-      if (selected_ == 3) return TitleAction::Exit;
+      if (selected_ == 4) return TitleAction::Exit;
     }
     return TitleAction::None;
   }
 
   // NewGameSetup or ConfigMenu
   const bool is_setup = (sub_mode_ == SubMode::NewGameSetup);
-  const int rows = is_setup ? 6 : 7;  // Setup has 4 opts + Start + Back; Config has 6 opts + Save&Back
+  const int rows = is_setup ? 6 : 8;  // Setup: 4 opts + Start + Back; Config: 7 opts + Save&Back
 
   if (back) {
     config_->save(config_path_);
@@ -164,7 +166,7 @@ TitleAction TitleScreen::update(float dt_sec, bool up, bool down, bool left, boo
     audio_->play_se("ui_move", data_root_ + "/audio/se/se_title_move.ogg");
   }
 
-  const int opt_count = is_setup ? 4 : 6;
+  const int opt_count = is_setup ? 4 : 7;
   if (left && sub_row_ < opt_count) {
     adjust_option(is_setup, sub_row_, -1);
   }
@@ -175,11 +177,11 @@ TitleAction TitleScreen::update(float dt_sec, bool up, bool down, bool left, boo
   if (touch_tap) {
     const float px = 110.0f;
     const float pw = 740.0f;
-    const float start_y = 148.0f;
-    const float row_h = 46.0f;
+    const float start_y = is_setup ? 148.0f : 142.0f;
+    const float row_h = is_setup ? 46.0f : 42.0f;
     for (int i = 0; i < rows; ++i) {
       float ry = start_y + i * row_h;
-      if (touch_x >= px && touch_x <= px + pw && touch_y >= ry && touch_y <= ry + 40.0f) {
+      if (touch_x >= px && touch_x <= px + pw && touch_y >= ry && touch_y <= ry + 38.0f) {
         sub_row_ = i;
         if (i < opt_count) {
           adjust_option(is_setup, i, (touch_x < 610.0f) ? -1 : 1);
@@ -216,23 +218,24 @@ void TitleScreen::draw_main() {
     renderer_->draw_texture(logo, 520.0f, 36.0f, lw, lh, 0.96f);
   }
 
-  const char* btn_tex[4][2] = {
+  const char* btn_tex[5][2] = {
       {"btn_newgame_1.png", "btn_newgame_2.png"},
       {"btn_continue_1.png", "btn_continue_2.png"},
+      {"", ""},
       {"btn_config_1.png", "btn_config_2.png"},
       {"", ""},
   };
-  const char* labels[4] = {"NEW GAME", "CONTINUE", "CONFIG", "EXIT"};
+  const char* labels[5] = {"NEW GAME", "CONTINUE", "MUSIC ROOM", "CONFIG", "EXIT"};
 
-  for (int i = 0; i < 4; ++i) {
-    float by = 256.0f + i * 54.0f;
+  for (int i = 0; i < 5; ++i) {
+    float by = 232.0f + i * 44.0f;
     bool enabled = !(i == 1 && !has_save_);
     bool sel = (selected_ == i);
     float alpha = enabled ? (sel ? 1.0f : 0.72f) : 0.30f;
 
     if (sel) {
       float glow = 0.25f + 0.12f * std::sin(anim_time_ * 4.5f);
-      renderer_->draw_rect(72.0f, by - 2.0f, 260.0f, 46.0f, 0.20f, 0.45f, 0.85f, glow);
+      renderer_->draw_rect(72.0f, by - 2.0f, 260.0f, 40.0f, 0.20f, 0.45f, 0.85f, glow);
     }
 
     const Texture* btex = nullptr;
@@ -244,7 +247,7 @@ void TitleScreen::draw_main() {
       renderer_->draw_texture(btex, 84.0f, by, static_cast<float>(btex->w),
                               static_cast<float>(btex->h), alpha);
     } else {
-      text_->draw_simple(labels[i], 96.0f, by + 8.0f, 1.0f, 1.0f, 1.0f, 1.0f, alpha);
+      text_->draw_simple(labels[i], 96.0f, by + 6.0f, 0.92f, 1.0f, 1.0f, 1.0f, alpha);
     }
   }
 
@@ -272,10 +275,10 @@ void TitleScreen::draw_options_panel(bool is_setup) {
                : "Changes preview live and save automatically to ux0:data/FateReVita/config.json.",
       110.0f, 114.0f, 0.72f, 0.72f, 0.80f, 0.90f, 0.90f);
 
-  const int opt_count = is_setup ? 4 : 6;
-  const int rows = is_setup ? 6 : 7;
-  const float start_y = 148.0f;
-  const float row_h = 46.0f;
+  const int opt_count = is_setup ? 4 : 7;
+  const int rows = is_setup ? 6 : 8;
+  const float start_y = is_setup ? 148.0f : 142.0f;
+  const float row_h = is_setup ? 46.0f : 42.0f;
 
   char vol_buf[3][16];
   if (config_) {
@@ -292,9 +295,9 @@ void TitleScreen::draw_options_panel(bool is_setup) {
     bool sel = (sub_row_ == i);
     if (sel) {
       float glow = 0.35f + 0.10f * std::sin(anim_time_ * 5.0f);
-      renderer_->draw_rect(104.0f, ry, 752.0f, 38.0f, 0.22f, 0.48f, 0.88f, glow);
+      renderer_->draw_rect(104.0f, ry, 752.0f, 36.0f, 0.22f, 0.48f, 0.88f, glow);
     } else {
-      renderer_->draw_rect(104.0f, ry, 752.0f, 38.0f, 0.10f, 0.14f, 0.24f, 0.45f);
+      renderer_->draw_rect(104.0f, ry, 752.0f, 36.0f, 0.10f, 0.14f, 0.24f, 0.45f);
     }
 
     if (i < opt_count && config_) {
@@ -313,20 +316,23 @@ void TitleScreen::draw_options_panel(bool is_setup) {
         name = "Start Point";
         val = kStartPresetLabels[start_preset_];
       } else if (!is_setup && i == 3) {
+        name = "Extras Unlock";
+        val = config_->unlock_all_extras ? "Unlock All (Music & CGs)" : "Normal (Unlock in Game)";
+      } else if (!is_setup && i == 4) {
         name = "BGM Volume";
         val = vol_buf[0];
-      } else if (!is_setup && i == 4) {
+      } else if (!is_setup && i == 5) {
         name = "SE Volume";
         val = vol_buf[1];
-      } else if (!is_setup && i == 5) {
+      } else if (!is_setup && i == 6) {
         name = "Voice Volume";
         val = vol_buf[2];
       }
-      text_->draw_simple(name, 124.0f, ry + 8.0f, 0.86f, 0.90f, 0.94f, 1.0f, 1.0f);
+      text_->draw_simple(name, 124.0f, ry + 7.0f, 0.84f, 0.90f, 0.94f, 1.0f, 1.0f);
       std::string arrows = "<  " + val + "  >";
       float vr = sel ? 1.0f : 0.78f;
       float vg = sel ? 0.96f : 0.88f;
-      text_->draw_simple(arrows, 460.0f, ry + 8.0f, 0.84f, vr, vg, 0.65f, 1.0f);
+      text_->draw_simple(arrows, 460.0f, ry + 7.0f, 0.82f, vr, vg, 0.65f, 1.0f);
     } else {
       const char* btn_lbl = (is_setup && i == 4)
                                 ? "[ START GAME ]"
@@ -334,7 +340,7 @@ void TitleScreen::draw_options_panel(bool is_setup) {
       float cr = (is_setup && i == 4) ? 0.55f : 0.85f;
       float cg = (is_setup && i == 4) ? 1.0f : 0.92f;
       float cb = (is_setup && i == 4) ? 0.65f : 1.0f;
-      text_->draw_simple(btn_lbl, 380.0f, ry + 8.0f, 0.92f, cr, cg, cb, 1.0f);
+      text_->draw_simple(btn_lbl, 380.0f, ry + 7.0f, 0.90f, cr, cg, cb, 1.0f);
     }
   }
 

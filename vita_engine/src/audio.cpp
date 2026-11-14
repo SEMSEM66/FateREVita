@@ -100,6 +100,7 @@ uint32_t read_le32(const uint8_t* p) {
 struct AudioStream {
   OggVorbis_File vf{};
   bool open = false;
+  bool paused = false;
   bool is_wav = false;
   bool loop = false;
   int channels = 2;
@@ -107,7 +108,10 @@ struct AudioStream {
 
   int64_t loop_start = 0;
   int64_t loop_end = 0;
+  int64_t saved_loop_start = 0;
+  int64_t saved_loop_len = 0;
   int64_t pcm_cursor = 0;
+  int64_t played_samples = 0;
 
   // Ogg staging buffer (up to 1024 stereo int16 samples)
   std::array<int16_t, 2048> ogg_buf{};
@@ -144,6 +148,7 @@ struct AudioStream {
       ov_clear(&vf);
     }
     open = false;
+    paused = false;
     is_wav = false;
     wav_pcm.clear();
     wav_frame_pos = 0;
@@ -152,8 +157,11 @@ struct AudioStream {
     ogg_pos = 0;
     ogg_frames = 0;
     pcm_cursor = 0;
+    played_samples = 0;
     loop_start = 0;
     loop_end = 0;
+    saved_loop_start = 0;
+    saved_loop_len = 0;
     resampler_primed = false;
     next_eof = false;
     stream_finished = false;
@@ -239,10 +247,14 @@ struct AudioStream {
 
   void apply_playback_params(bool should_loop, float vol, int fade_in_ms,
                              int64_t lp_start, int64_t lp_len) {
+    paused = false;
+    saved_loop_start = (lp_start > 0) ? lp_start : 0;
+    saved_loop_len = (lp_len > 0) ? lp_len : 0;
     loop = should_loop;
-    loop_start = (should_loop && lp_start > 0) ? lp_start : 0;
-    loop_end = (should_loop && lp_len > 0) ? (loop_start + lp_len) : 0;
+    loop_start = (should_loop && saved_loop_start > 0) ? saved_loop_start : 0;
+    loop_end = (should_loop && saved_loop_len > 0) ? (loop_start + saved_loop_len) : 0;
     pcm_cursor = 0;
+    played_samples = 0;
 
     if (fade_in_ms > 0) {
       volume = 0.0f;
@@ -435,7 +447,7 @@ struct AudioStream {
 
   // Decode up to `frames` stereo samples (interleaved L,R) and add into `mix`.
   void mix_into(float* mix, int frames, float bus_gain) {
-    if (!open) return;
+    if (!open || paused) return;
     for (int i = 0; i < frames; ++i) {
       float sl = 0.0f;
       float sr = 0.0f;
@@ -443,6 +455,7 @@ struct AudioStream {
         close();
         break;
       }
+      ++played_samples;
       if (fade_samples_total > 0) {
         float t = static_cast<float>(fade_samples_done) / fade_samples_total;
         if (t >= 1.0f) {
@@ -645,6 +658,48 @@ void AudioEngine::fade_bgm(int target_pct, int time_ms) {
   sceKernelLockMutex(g_audio.mutex, 1, nullptr);
   g_audio.bgm.start_fade(std::max(0, std::min(100, target_pct)) / 100.0f, time_ms, false);
   sceKernelUnlockMutex(g_audio.mutex, 1);
+}
+
+void AudioEngine::set_bgm_paused(bool paused) {
+  sceKernelLockMutex(g_audio.mutex, 1, nullptr);
+  if (g_audio.bgm.open) g_audio.bgm.paused = paused;
+  sceKernelUnlockMutex(g_audio.mutex, 1);
+}
+
+void AudioEngine::set_bgm_loop(bool should_loop) {
+  sceKernelLockMutex(g_audio.mutex, 1, nullptr);
+  if (g_audio.bgm.open) {
+    g_audio.bgm.loop = should_loop;
+    g_audio.bgm.loop_start =
+        (should_loop && g_audio.bgm.saved_loop_start > 0) ? g_audio.bgm.saved_loop_start : 0;
+    g_audio.bgm.loop_end = (should_loop && g_audio.bgm.saved_loop_len > 0)
+                               ? (g_audio.bgm.loop_start + g_audio.bgm.saved_loop_len)
+                               : 0;
+  }
+  sceKernelUnlockMutex(g_audio.mutex, 1);
+}
+
+bool AudioEngine::is_bgm_paused() const {
+  sceKernelLockMutex(g_audio.mutex, 1, nullptr);
+  bool p = g_audio.bgm.open && g_audio.bgm.paused;
+  sceKernelUnlockMutex(g_audio.mutex, 1);
+  return p;
+}
+
+bool AudioEngine::is_bgm_playing() const {
+  sceKernelLockMutex(g_audio.mutex, 1, nullptr);
+  bool playing = g_audio.bgm.open;
+  sceKernelUnlockMutex(g_audio.mutex, 1);
+  return playing;
+}
+
+double AudioEngine::get_bgm_time_sec() const {
+  sceKernelLockMutex(g_audio.mutex, 1, nullptr);
+  double sec = g_audio.bgm.open
+                   ? (static_cast<double>(g_audio.bgm.played_samples) / static_cast<double>(kSampleRate))
+                   : 0.0;
+  sceKernelUnlockMutex(g_audio.mutex, 1);
+  return sec;
 }
 
 void AudioEngine::play_voice(const std::string& path) {

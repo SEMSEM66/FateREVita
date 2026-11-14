@@ -13,6 +13,7 @@ enum class TitleAction {
   None,
   NewGame,
   Continue,
+  MusicRoom,
   Exit,
 };
 

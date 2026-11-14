@@ -34,6 +34,7 @@ struct AppConfig {
   OstMode ost_mode = OstMode::New;
   ContentMode content_mode = ContentMode::AllAges;
   bool unlock_all_routes = true;
+  bool unlock_all_extras = false;
   float bgm_vol = 0.8f;
   float se_vol = 0.9f;
   float voice_vol = 1.0f;
@@ -73,6 +74,7 @@ struct AppConfig {
     }
 
     unlock_all_routes = j.value("unlock_all_routes", true);
+    unlock_all_extras = j.value("unlock_all_extras", false);
     bgm_vol = j.value("bgm_vol", 0.8f);
     se_vol = j.value("se_vol", 0.9f);
     voice_vol = j.value("voice_vol", 1.0f);
@@ -84,6 +86,7 @@ struct AppConfig {
     sceIoMkdir("ux0:data", 0777);
     sceIoMkdir("ux0:data/FateReVita", 0777);
     nlohmann::json j;
+    j["version"] = 2;
     j["ost_mode"] = (ost_mode == OstMode::Old) ? "old" : "new";
     if (content_mode == ContentMode::HMosaic) {
       j["content_mode"] = "h_mosaic";
@@ -93,6 +96,7 @@ struct AppConfig {
       j["content_mode"] = "all_ages";
     }
     j["unlock_all_routes"] = unlock_all_routes;
+    j["unlock_all_extras"] = unlock_all_extras;
     j["bgm_vol"] = bgm_vol;
     j["se_vol"] = se_vol;
     j["voice_vol"] = voice_vol;

@@ -24,6 +24,7 @@ add_executable(${PROJECT_NAME}
   src/text.cpp
   src/script_vm.cpp
   src/title_screen.cpp
+  src/extras.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

@@ -13,12 +13,19 @@
 
 namespace fsn {
 
+class ExtrasManager;
+
 class ScriptVM {
  public:
   bool init(const std::string& data_root, Renderer* renderer, AudioEngine* audio,
-            TextRenderer* text, AppConfig* config, const std::string& global_flags_path);
+            TextRenderer* text, AppConfig* config, const std::string& global_flags_path,
+            ExtrasManager* extras = nullptr);
 
   TitleBgmInfo get_title_bgm_info() const;
+  const nlohmann::json& manifest() const { return manifest_; }
+  std::string resolve_bgm_for_ost(const std::string& raw_name, OstMode ost,
+                                  int64_t* loop_start = nullptr,
+                                  int64_t* loop_len = nullptr) const;
 
   bool start_preset(int preset_index, const std::string& choice_backup_path = "");
   bool start_flowchart(const std::string& fcf_stem, int start_node = -1);
@@ -102,6 +109,7 @@ class ScriptVM {
   AudioEngine* audio_ = nullptr;
   TextRenderer* text_ = nullptr;
   AppConfig* config_ = nullptr;
+  ExtrasManager* extras_ = nullptr;
 
   nlohmann::json manifest_;
   nlohmann::json script_;

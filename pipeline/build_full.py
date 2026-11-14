@@ -30,7 +30,7 @@ PIPELINE_DIR = Path(__file__).resolve().parent
 ROOT = PIPELINE_DIR.parent
 sys.path.insert(0, str(PIPELINE_DIR))
 
-from epk_decrypt import decrypt_epk_bytes
+from epk_decrypt import decrypt_epk_bytes, decrypt_epk_rows
 from fcd_decrypt import fcd_to_ogg
 from fpd_stream import StreamingFPD, build_pack_asset_index, read_pack_asset
 from xp3_reader import XP3Archive, decode_text, parse_decensor_dic, parse_sli
@@ -524,6 +524,117 @@ def decode_steam_audio(raw: bytes) -> Tuple[bytes, str]:
     return fcd_to_ogg(raw), ".ogg"
 
 
+EXTRA_BGM_TITLES: Dict[str, Tuple[int, str]] = {
+    "bgm22": (101, "Emiya (2004 ver.)"),
+    "bgm26": (102, "Season of Change 2 (Utsuriyuku Kisetsu 2)"),
+    "bgm27": (103, "Days"),
+    "bgm33": (104, "Embrace 2 (Houyou 2)"),
+    "bgm38": (105, "THIS ILLUSION (Fate ver.)"),
+    "bgm40": (106, "Embrace (Houyou)"),
+    "bgm43trial": (107, "Whirlpool of Fate 2 (Trial ver.)"),
+    "bgm48": (108, "True Reproduction (2004 ver.)"),
+    "bgm50": (109, "The Boundary of Everything (2004 ver.)"),
+    "bgm51": (110, "Golden Brilliance (Short ver.)"),
+    "bgm76": (111, "Link"),
+    "bgm_wakame": (112, "Wakame Paradise"),
+}
+
+
+def find_p00_entry(
+    p00m: Optional[StreamingFPD], p00m_p: Optional[StreamingFPD], rel_path: str
+) -> Optional[Tuple[StreamingFPD, object]]:
+    for arc in (p00m_p, p00m):
+        if arc is None:
+            continue
+        for ent in arc.entries:
+            if ent.filepath == rel_path:
+                return arc, ent
+    return None
+
+
+def fallback_bgm_title(stem: str) -> str:
+    if stem in EXTRA_BGM_TITLES:
+        return EXTRA_BGM_TITLES[stem][1]
+    m = re.match(r"bgm(\d+)(.*)", stem.lower())
+    if m:
+        num = int(m.group(1))
+        suf = m.group(2).strip()
+        return f"Track {num:02d}" + (f" ({suf})" if suf else "")
+    return stem
+
+
+def build_bgm_index(
+    p00m: Optional[StreamingFPD],
+    p00m_p: Optional[StreamingFPD],
+    manifest_bgm: Dict[str, str],
+    manifest_bgm_old: Dict[str, str],
+    manifest_bgm_old_loops: Dict[str, List[int]],
+) -> dict:
+    """Build audio/bgm_index.json metadata combining Steam EPKs and UE OST tracks."""
+    epk_orders: Dict[str, int] = {}
+    epk_titles: Dict[str, str] = {}
+
+    found_data = find_p00_entry(p00m, p00m_p, "root/data/locale/us/epk/bgm_data.epk")
+    if found_data is not None:
+        arc, ent = found_data
+        for parts in decrypt_epk_rows(arc.read_entry(ent), "bgm_data"):
+            if len(parts) >= 6:
+                stem = parts[4].strip().lower()
+                try:
+                    order = int(parts[3].strip())
+                except ValueError:
+                    order = 999
+                title = parts[5].strip()
+                if stem:
+                    epk_orders[stem] = order
+                    if title:
+                        epk_titles[stem] = title
+
+    sub_unlocks: Dict[str, List[str]] = {}
+    found_flag = find_p00_entry(p00m, p00m_p, "root/data/epk/bgm_flag.epk")
+    if found_flag is not None:
+        arc, ent = found_flag
+        for parts in decrypt_epk_rows(arc.read_entry(ent), "bgm_flag"):
+            if len(parts) >= 3:
+                child = parts[1].strip().lower()
+                parent = parts[2].strip().lower()
+                if child and parent:
+                    sub_unlocks.setdefault(parent, [])
+                    if child not in sub_unlocks[parent]:
+                        sub_unlocks[parent].append(child)
+
+    filtered_new = {
+        s for s in manifest_bgm.keys() if not (s.endswith("g") and s[:-1] in manifest_bgm)
+    }
+    all_stems = filtered_new | set(manifest_bgm_old.keys())
+
+    def sort_key(stem: str) -> Tuple[int, str]:
+        if stem in epk_orders:
+            return (epk_orders[stem], stem)
+        if stem in EXTRA_BGM_TITLES:
+            return (EXTRA_BGM_TITLES[stem][0], stem)
+        return (500, stem)
+
+    tracks = []
+    for idx, stem in enumerate(sorted(all_stems, key=sort_key), start=1):
+        title = epk_titles.get(stem) or fallback_bgm_title(stem)
+        loop_pair = manifest_bgm_old_loops.get(stem, [0, 0])
+        tracks.append(
+            {
+                "id": stem,
+                "order": epk_orders.get(stem, 100 + idx),
+                "title": title,
+                "new_file": manifest_bgm.get(stem, ""),
+                "old_file": manifest_bgm_old.get(stem, ""),
+                "old_loop_start": int(loop_pair[0]) if len(loop_pair) >= 2 else 0,
+                "old_loop_len": int(loop_pair[1]) if len(loop_pair) >= 2 else 0,
+                "sub_unlocks": sub_unlocks.get(stem, []),
+            }
+        )
+
+    return {"version": 1, "tracks": tracks}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build full-game Vita assets + UE restoration.")
     parser.add_argument("--steam", type=Path, default=STEAM_DEFAULT)
@@ -890,11 +1001,23 @@ def main() -> None:
         rel = f"audio/bgm_old/{stem}.ogg"
         (out / rel).write_bytes(arc.read_entry(ent))
         manifest_bgm_old[stem] = rel
+        sli_arc = ue_bgm
         sli_ent = ue_bgm.get_ci(f"{stem}.ogg.sli")
+        if sli_ent is None:
+            sli_ent = ue_patch.get_ci(f"{stem}.ogg.sli")
+            sli_arc = ue_patch
         if sli_ent is not None:
-            ls, ll = parse_sli(ue_bgm.read_entry(sli_ent))
+            ls, ll = parse_sli(sli_arc.read_entry(sli_ent))
             if ll > 0:
                 manifest_bgm_old_loops[stem] = [ls, ll]
+
+    bgm_index_obj = build_bgm_index(
+        p00m, p00m_p, manifest_bgm, manifest_bgm_old, manifest_bgm_old_loops
+    )
+    (out / "audio" / "bgm_index.json").write_text(
+        json.dumps(bgm_index_obj, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"[AUDIO] Wrote audio/bgm_index.json ({len(bgm_index_obj['tracks'])} tracks).")
 
     print(f"[AUDIO] Exporting {len(ref_se)} SE tracks...")
     manifest_se: Dict[str, str] = {}
@@ -1003,6 +1126,7 @@ def main() -> None:
         "bgm": manifest_bgm,
         "bgm_old": manifest_bgm_old,
         "bgm_old_loops": manifest_bgm_old_loops,
+        "bgm_index": "audio/bgm_index.json",
         "se": manifest_se,
         "voice": manifest_voice,
         "missing": {

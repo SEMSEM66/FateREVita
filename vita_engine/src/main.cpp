@@ -1,5 +1,6 @@
 #include "audio.hpp"
 #include "config.hpp"
+#include "extras.hpp"
 #include "log.hpp"
 #include "renderer.hpp"
 #include "script_vm.hpp"
@@ -401,6 +402,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
   const std::string save_path = ux0_dir + "/save0.json";
   const std::string global_flags_path = ux0_dir + "/global_flags.json";
   const std::string choice_backup_path = ux0_dir + "/choice_autosave.json";
+  const std::string extras_path = ux0_dir + "/extras.json";
 
   fsn::AppConfig config;
   config.load(config_path);
@@ -416,14 +418,22 @@ int main(int /*argc*/, char* /*argv*/[]) {
     fsn::log::info("[Main] Font load failed; check data root");
   }
 
+  fsn::ExtrasManager extras;
   fsn::ScriptVM vm;
-  bool vm_ok = vm.init(data_root, &renderer, &audio, &text, &config, global_flags_path);
+  bool vm_ok = vm.init(data_root, &renderer, &audio, &text, &config, global_flags_path, &extras);
+  if (vm_ok) {
+    extras.init(data_root, extras_path, vm.manifest());
+  }
 
   fsn::TitleScreen title;
   title.init(data_root, &renderer, &audio, &text, &config, config_path,
              vm.get_title_bgm_info(), file_exists(save_path.c_str()));
 
-  enum class AppMode { BootNotice, Title, Game };
+  fsn::MusicRoomScreen music_room;
+  music_room.init(data_root, &renderer, &audio, &text, &config, config_path,
+                  &extras, &vm, circle_confirm);
+
+  enum class AppMode { BootNotice, Title, MusicRoom, Game };
   AppMode mode = AppMode::BootNotice;
   float boot_timer = 0.0f;
 
@@ -471,7 +481,10 @@ int main(int /*argc*/, char* /*argv*/[]) {
     bool btn_advance = btn_any_confirm || touch_tap;
     bool btn_skip_held = (pad.buttons & SCE_CTRL_RTRIGGER) != 0;
     bool btn_toggle_text = (pressed & SCE_CTRL_SQUARE) != 0;
+    bool btn_l = (pressed & SCE_CTRL_LTRIGGER) != 0;
+    bool btn_r = (pressed & SCE_CTRL_RTRIGGER) != 0;
     bool btn_start = (pressed & SCE_CTRL_START) != 0;
+    bool btn_select = (pressed & SCE_CTRL_SELECT) != 0;
 
     renderer.begin_frame();
 
@@ -516,9 +529,23 @@ int main(int /*argc*/, char* /*argv*/[]) {
           if (vm.load_quicksave(save_path)) {
             mode = AppMode::Game;
           }
+        } else if (act == fsn::TitleAction::MusicRoom) {
+          music_room.enter();
+          mode = AppMode::MusicRoom;
         } else if (act == fsn::TitleAction::Exit) {
           running = false;
         }
+      }
+    } else if (mode == AppMode::MusicRoom) {
+      bool stay = music_room.update(
+          dt, btn_up, btn_down, btn_left, btn_right,
+          btn_sys_confirm, btn_sys_back, btn_triangle, btn_toggle_text,
+          btn_l, btn_r, btn_start, btn_select,
+          touch_tap, touch_x, touch_y);
+      music_room.draw();
+      if (!stay) {
+        mode = AppMode::Title;
+        title.enter(file_exists(save_path.c_str()));
       }
     } else if (mode == AppMode::Game) {
       if (pause_open) {
