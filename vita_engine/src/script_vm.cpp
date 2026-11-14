@@ -1,6 +1,7 @@
 #include "script_vm.hpp"
 #include "extras.hpp"
 #include "log.hpp"
+#include "video_player.hpp"
 
 #include <psp2/io/stat.h>
 
@@ -429,7 +430,22 @@ void ScriptVM::complete_fcf_scene() {
   if (fcf_stem_ == "prologue") {
     if (fcf_node_id_ == 1) { enter_fcf_node(2); return; }
     if (fcf_node_id_ == 2) { enter_fcf_node(3); return; }
-    if (fcf_node_id_ == 3) { enter_fcf_node(0); return; }
+    if (fcf_node_id_ == 3) {
+      bool script_had_movie = false;
+      if (script_.contains("ops") && script_["ops"].is_array()) {
+        for (const auto& op : script_["ops"]) {
+          if (op.value("cmd", "") == "playmovie") {
+            script_had_movie = true;
+            break;
+          }
+        }
+      }
+      if (!script_had_movie) {
+        exec_cmd("playmovie", {{"storage", "op01"}, {"canskip", "true"}});
+      }
+      enter_fcf_node(0);
+      return;
+    }
   }
 
   int next_id = -1;
@@ -1273,6 +1289,20 @@ void ScriptVM::exec_cmd(const std::string& cmd, const nlohmann::json& args) {
       choice_selected_ = 0;
       choice_active_ = true;
       tiger_retry_mode_ = true;
+    }
+  } else if (cmd == "playmovie") {
+    std::string storage = get_file_arg();
+    bool canskip = arg_bool(args, "canskip", true);
+    bool had_bgm = cur_bgm_playing_;
+    std::string prev_bgm = cur_bgm_stem_;
+    audio_->stop_voice();
+    audio_->stop_bgm(0);
+    cur_bgm_playing_ = false;
+    VideoPlayer::play(storage, canskip, data_root_, manifest_, renderer_, audio_);
+    if (had_bgm && !prev_bgm.empty()) {
+      play_bgm_stem(prev_bgm, 300);
+    } else {
+      cur_bgm_stem_.clear();
     }
   } else if (cmd == "call") {
     std::string st = strip_ext(arg_str(args, "storage"));

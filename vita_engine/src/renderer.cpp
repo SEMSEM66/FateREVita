@@ -74,9 +74,11 @@ GLuint compile_cg_shader(GLenum type, const char* src) {
 }  // namespace
 
 bool Renderer::init() {
-  const GLboolean res_overridden =
-      vglInitExtended(0x100000, 960, 544, 16 * 1024 * 1024, SCE_GXM_MULTISAMPLE_NONE);
-  log::info("[Renderer] vglInitExtended completed (res_overridden=%d)",
+  // Reserve 16MB USER_RW, 16MB CDRAM, and 8MB PHYCONT outside vitaGL pools for SceVideodec.
+  const GLboolean res_overridden = vglInitWithCustomThreshold(
+      0x100000, 960, 544, 16 * 1024 * 1024, 16 * 1024 * 1024, 8 * 1024 * 1024, 0,
+      SCE_GXM_MULTISAMPLE_NONE);
+  log::info("[Renderer] vglInitWithCustomThreshold completed (res_overridden=%d)",
             static_cast<int>(res_overridden));
 
   glViewport(0, 0, 960, 544);

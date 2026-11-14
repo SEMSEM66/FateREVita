@@ -25,6 +25,7 @@ add_executable(${PROJECT_NAME}
   src/script_vm.cpp
   src/title_screen.cpp
   src/extras.cpp
+  src/video_player.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -63,6 +64,7 @@ target_link_libraries(${PROJECT_NAME}
   SceCtrl_stub
   SceTouch_stub
   SceAudio_stub
+  SceVideodec_stub
   ScePower_stub
   SceSysmodule_stub
   SceCommonDialog_stub

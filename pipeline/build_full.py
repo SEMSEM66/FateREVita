@@ -20,7 +20,10 @@ import io
 import json
 import re
 import shutil
+import struct
+import subprocess
 import sys
+import tarfile
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -849,6 +852,306 @@ def build_cg_index_and_thumbs(
     }
 
 
+def find_ffmpeg_exe() -> Optional[str]:
+    """Return path to ffmpeg executable on PATH (or Windows scoop shim fallback)."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    scoop_shim = Path.home() / "scoop" / "shims" / "ffmpeg.exe"
+    if scoop_shim.exists():
+        return str(scoop_shim)
+    return None
+
+
+def parse_h264_annexb_frames(h264_bytes: bytes) -> List[Tuple[int, int]]:
+    """Split an H.264 Annex-B byte stream into one (offset, size) Access Unit per frame."""
+    n = len(h264_bytes)
+    nals: List[Tuple[int, int]] = []
+    pos = 0
+    while True:
+        idx = h264_bytes.find(b"\x00\x00\x01", pos)
+        if idx < 0:
+            break
+        sc_start = idx - 1 if (idx > pos and h264_bytes[idx - 1] == 0) else idx
+        hdr_pos = idx + 3
+        if hdr_pos < n:
+            nal_type = h264_bytes[hdr_pos] & 0x1F
+            nals.append((sc_start, nal_type))
+        pos = idx + 3
+
+    if not nals:
+        return []
+
+    seen_aud = any(nt == 9 for _, nt in nals)
+    frames: List[Tuple[int, int]] = []
+    au_start: Optional[int] = None
+    au_has_vcl = False
+
+    for sc_start, nal_type in nals:
+        is_vcl = nal_type in (1, 5)
+        is_au_boundary = False
+        if au_start is not None and au_has_vcl:
+            if seen_aud:
+                if nal_type in (6, 7, 8, 9):
+                    is_au_boundary = True
+            else:
+                if nal_type in (1, 5, 6, 7, 8, 9):
+                    is_au_boundary = True
+
+        if is_au_boundary and au_start is not None:
+            frames.append((au_start, sc_start - au_start))
+            au_start = sc_start
+            au_has_vcl = False
+
+        if au_start is None:
+            au_start = sc_start
+
+        if is_vcl:
+            au_has_vcl = True
+
+    if au_start is not None and au_has_vcl:
+        frames.append((au_start, n - au_start))
+
+    return frames
+
+
+def write_vidx_file(
+    path: Path,
+    width: int,
+    height: int,
+    fps_num: int,
+    fps_den: int,
+    frames: List[Tuple[int, int]],
+) -> None:
+    """Write little-endian VIDX frame offset table consumed by Vita VideoPlayer."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = struct.pack("<7I", 0x58444956, 1, width, height, fps_num, fps_den, len(frames))
+    body = b"".join(struct.pack("<2I", off, sz) for off, sz in frames)
+    path.write_bytes(header + body)
+
+
+def export_opening_movies(
+    steam_dir: Path,
+    ue_dir: Path,
+    key: bytes,
+    out: Path,
+) -> Dict[str, dict]:
+    """Transcode opening movies (op01..op03) into PS Vita H.264 Baseline + .vidx + .ogg."""
+    ffmpeg = find_ffmpeg_exe()
+    if not ffmpeg:
+        print("[VIDEO] Warning: ffmpeg not found on PATH; skipping movie transcoding.")
+        return {}
+
+    video_dir = out / "video"
+    cache_dir = out / ".cache"
+    video_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Index Steam pack01d.bin entries by lowercase filename (e.g., op01.ogv, op01.fcd)
+    p01d: Optional[StreamingFPD] = None
+    opv_by_name: Dict[str, object] = {}
+    pack01d_path = steam_dir / "obb" / "pack01d.bin"
+    if pack01d_path.exists():
+        p01d = StreamingFPD(pack01d_path, key)
+        for e in p01d.entries:
+            if e.filepath.startswith("root/data/opv/"):
+                opv_by_name[Path(e.filepath).name.lower()] = e
+
+    # Optional UE video fallback archives
+    ue_video_arcs: List[XP3Archive] = []
+    for xp3_name in ("patch_op.xp3", "video.xp3", "patch.xp3"):
+        xp3_path = ue_dir / xp3_name
+        if xp3_path.exists():
+            ue_video_arcs.append(XP3Archive(xp3_path))
+
+    manifest_videos: Dict[str, dict] = {}
+    for stem in ("op01", "op02", "op03"):
+        h264_path = video_dir / f"{stem}.h264"
+        vidx_path = video_dir / f"{stem}.vidx"
+        ogg_path = video_dir / f"{stem}.ogg"
+
+        # 1) Audio track (.ogg) from Steam .fcd or extracted later from source video
+        if not ogg_path.exists() or ogg_path.stat().st_size == 0:
+            fcd_ent = opv_by_name.get(f"{stem}.fcd") if p01d is not None else None
+            if p01d is not None and fcd_ent is not None:
+                audio_data, audio_ext = decode_steam_audio(p01d.read_entry(fcd_ent))
+                if audio_ext == ".ogg":
+                    ogg_path.write_bytes(audio_data)
+                else:
+                    tmp_aud = cache_dir / f"_tmp_{stem}{audio_ext}"
+                    tmp_aud.write_bytes(audio_data)
+                    try:
+                        subprocess.run(
+                            [ffmpeg, "-y", "-i", str(tmp_aud), "-vn", "-c:a", "libvorbis", "-q:a", "5", str(ogg_path)],
+                            check=True,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE,
+                        )
+                    finally:
+                        tmp_aud.unlink(missing_ok=True)
+
+        # 2) Video track (.h264 + .vidx)
+        frames: Optional[List[Tuple[int, int]]] = None
+        if (
+            h264_path.exists()
+            and h264_path.stat().st_size > 0
+            and vidx_path.exists()
+            and vidx_path.stat().st_size >= 28
+        ):
+            raw_hdr = vidx_path.read_bytes()[:28]
+            magic, ver, vw, vh, fnum, fden, nframes = struct.unpack("<7I", raw_hdr)
+            if (
+                magic == 0x58444956
+                and ver == 1
+                and vw == 960
+                and vh == 544
+                and nframes > 0
+                and vidx_path.stat().st_size == 28 + nframes * 8
+            ):
+                manifest_videos[stem] = {
+                    "h264": f"video/{stem}.h264",
+                    "vidx": f"video/{stem}.vidx",
+                    "audio": f"video/{stem}.ogg",
+                    "width": vw,
+                    "height": vh,
+                    "fps": float(fnum) / float(max(1, fden)),
+                    "frames": nframes,
+                }
+                if ogg_path.exists() and ogg_path.stat().st_size > 0:
+                    continue
+
+        src_bytes: Optional[bytes] = None
+        src_ext = ".ogv"
+        if p01d is not None:
+            for cand in (f"{stem}.ogv", f"{stem}z.ogv", f"{stem}s.ogv", f"{stem}h.ogv"):
+                ent = opv_by_name.get(cand)
+                if ent is not None:
+                    src_bytes = p01d.read_entry(ent)
+                    src_ext = Path(cand).suffix
+                    break
+
+        if src_bytes is None:
+            for arc in ue_video_arcs:
+                for cand in (f"{stem}.mpg", f"{stem}.wmv", f"{stem}.ogv", f"{stem}.mp4"):
+                    raw_ue = arc.read_ci(cand)
+                    if raw_ue is not None:
+                        src_bytes = raw_ue
+                        src_ext = Path(cand).suffix
+                        break
+                if src_bytes is not None:
+                    break
+
+        if src_bytes is None:
+            print(f"[VIDEO] Warning: source movie not found for {stem}; skipping.")
+            continue
+
+        tmp_vid = cache_dir / f"_src_{stem}{src_ext}"
+        tmp_vid.write_bytes(src_bytes)
+        try:
+            if not ogg_path.exists() or ogg_path.stat().st_size == 0:
+                subprocess.run(
+                    [ffmpeg, "-y", "-i", str(tmp_vid), "-vn", "-c:a", "libvorbis", "-q:a", "5", str(ogg_path)],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+
+            subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-i",
+                    str(tmp_vid),
+                    "-an",
+                    "-c:v",
+                    "libx264",
+                    "-profile:v",
+                    "baseline",
+                    "-level:v",
+                    "3.1",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-vf",
+                    "scale=960:544",
+                    "-r",
+                    "24000/1001",
+                    "-bf",
+                    "0",
+                    "-refs",
+                    "1",
+                    "-g",
+                    "48",
+                    "-b:v",
+                    "1500k",
+                    "-maxrate",
+                    "2000k",
+                    "-bufsize",
+                    "2000k",
+                    "-x264-params",
+                    "aud=1",
+                    "-f",
+                    "h264",
+                    str(h264_path),
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        finally:
+            tmp_vid.unlink(missing_ok=True)
+
+        frames = parse_h264_annexb_frames(h264_path.read_bytes())
+        if not frames:
+            raise RuntimeError(f"Parsed 0 H.264 frames from {h264_path}")
+        write_vidx_file(vidx_path, 960, 544, 24000, 1001, frames)
+        manifest_videos[stem] = {
+            "h264": f"video/{stem}.h264",
+            "vidx": f"video/{stem}.vidx",
+            "audio": f"video/{stem}.ogg",
+            "width": 960,
+            "height": 544,
+            "fps": 24000.0 / 1001.0,
+            "frames": len(frames),
+        }
+        print(
+            f"[VIDEO] Transcoded {stem}: {len(frames)} frames "
+            f"({h264_path.stat().st_size / (1024 * 1024):.1f} MB H.264 + "
+            f"{ogg_path.stat().st_size / (1024 * 1024):.1f} MB OGG)"
+        )
+
+    return manifest_videos
+
+
+def pack_base_tar(out: Path, tar_path: Path) -> int:
+    """Repack uncompressed USTAR base archive (excluding .cache and audio/voice)."""
+    tar_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_tar = tar_path.with_suffix(".tar.tmp")
+    files: List[Tuple[str, Path]] = []
+    manifest_file = out / "manifest.json"
+    if manifest_file.exists():
+        files.append(("manifest.json", manifest_file))
+
+    others: List[Tuple[str, Path]] = []
+    for f in out.rglob("*"):
+        if not f.is_file():
+            continue
+        rel = f.relative_to(out).as_posix()
+        if rel == "manifest.json" or rel == ".cache" or rel.startswith(".cache/"):
+            continue
+        if rel == "audio/voice" or rel.startswith("audio/voice/"):
+            continue
+        others.append((rel, f))
+    others.sort(key=lambda item: item[0])
+    files.extend(others)
+
+    with tarfile.open(tmp_tar, "w", format=tarfile.USTAR_FORMAT) as tf:
+        for rel, fpath in files:
+            tf.add(fpath, arcname=rel, recursive=False)
+    tmp_tar.replace(tar_path)
+    print(f"[TAR] Packed {len(files)} files into {tar_path} ({tar_path.stat().st_size / (1024 * 1024):.1f} MB)")
+    return len(files)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build full-game Vita assets + UE restoration.")
     parser.add_argument("--steam", type=Path, default=STEAM_DEFAULT)
@@ -856,6 +1159,7 @@ def main() -> None:
     parser.add_argument("--key", type=Path, default=KEY_DEFAULT)
     parser.add_argument("--out", type=Path, default=ROOT / "vita_data_full")
     parser.add_argument("--no-voices", action="store_true", help="Skip 28k voice exports for rapid tests")
+    parser.add_argument("--no-video", action="store_true", help="Skip ffmpeg movie transcoding")
     parser.add_argument("--workers", type=int, default=12)
     args = parser.parse_args()
 
@@ -870,6 +1174,7 @@ def main() -> None:
         "images/h_demosaic",
         "images/rules",
         "gallery/thumbs",
+        "video",
         "audio/bgm",
         "audio/bgm_old",
         "audio/se",
@@ -930,6 +1235,14 @@ def main() -> None:
         stem = ks_rel[:-3]
         raw = arc.read_entry(ent).decode("utf-8-sig", errors="replace")
         sc = parse_ks_script(raw, us_msgs, (1920, 1080), ue_ctx=None)
+        if stem == "プロローグ3日目":
+            ops = sc.setdefault("ops", [])
+            if not any(op.get("cmd") == "playmovie" for op in ops):
+                pm_op = {"op": "cmd", "cmd": "playmovie", "args": {"storage": "op01", "canskip": "true"}}
+                if ops and ops[-1].get("cmd") == "return":
+                    ops.insert(len(ops) - 1, pm_op)
+                else:
+                    ops.append(pm_op)
         collect_script_assets(sc, ref_images, ref_rules, ref_bgm, ref_se, ref_voice)
         fname = f"scripts/{ascii_id('sc', stem)}.json"
         (out / fname).write_text(json.dumps(sc, ensure_ascii=False), encoding="utf-8")
@@ -1328,6 +1641,12 @@ def main() -> None:
     else:
         print(f"[VOICE] Skipped {len(ref_voice)} voice exports (--no-voices set).")
 
+    manifest_videos: Dict[str, dict] = {}
+    if not args.no_video:
+        manifest_videos = export_opening_movies(args.steam, args.ue, key, out)
+    else:
+        print("[VIDEO] Skipped movie transcoding (--no-video set).")
+
     # --- 9. Fonts & UI & Gallery & Manifest ---
     cg_index_obj = build_cg_index_and_thumbs(
         out,
@@ -1364,6 +1683,7 @@ def main() -> None:
         "cg_index": "gallery/cg_index.json",
         "se": manifest_se,
         "voice": manifest_voice,
+        "videos": manifest_videos,
         "missing": {
             "images": missing_imgs,
             "rules": missing_rules,
@@ -1372,6 +1692,10 @@ def main() -> None:
         },
     }
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    dist_dir = ROOT / "dist"
+    if dist_dir.exists():
+        pack_base_tar(out, dist_dir / "FateReVita_base.tar")
 
     # Summary sizes
     total_bytes = sum(f.stat().st_size for f in out.rglob("*") if f.is_file() and ".cache" not in f.parts)
